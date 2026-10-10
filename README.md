@@ -239,12 +239,10 @@ proxy_send_timeout 300s;
 proxy_read_timeout 300s;
 
 client_max_body_size 1m;
-
-# Pass the real client IP (used for login rate limiting).
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
 ```
+
+NPM already forwards the client IP (`X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`), which the login rate
+limiter uses, so no header lines are needed here.
 
 This proxy host only forwards to the mealie-mcp container's port. The TrueNAS admin UI (ports 80/443 on the TrueNAS
 host) is never proxied: don't create proxy hosts for it, and don't forward router ports to it.
