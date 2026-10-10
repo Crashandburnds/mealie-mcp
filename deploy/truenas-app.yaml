@@ -1,0 +1,57 @@
+# TrueNAS SCALE: Apps > Discover Apps > ⋮ > Install via YAML. App name: mealie-mcp
+# Replace the three CHANGE_ME values. Generate AUTH_SECRET with: openssl rand -hex 32
+services:
+  mealie-mcp:
+    image: crashandburnds92/mealie-mcp:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      # --- Mealie ---
+      MEALIE_URL: https://mealie.crashtech.co.uk
+      MEALIE_API_TOKEN: CHANGE_ME_your_mealie_api_token
+      # --- Public address (what Claude / ChatGPT connect to, without /mcp) ---
+      PUBLIC_BASE_URL: https://mcp.crashtech.co.uk
+      # --- Authentication ---
+      AUTH_MODE: oauth
+      OWNER_PASSWORD: CHANGE_ME_long_password_you_type_when_connecting
+      AUTH_SECRET: CHANGE_ME_64_hex_characters_from_openssl
+      # Optional bearer token(s) for Claude Code --header / scripts (min 32 chars). Empty = OAuth only.
+      STATIC_TOKENS: ""
+      OAUTH_ALLOWED_REDIRECT_HOSTS: chatgpt.com,chat.openai.com,claude.ai,claude.com
+      OAUTH_ALLOW_LOOPBACK_REDIRECTS: "true"
+      # --- Import policy ---
+      IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk
+      DRY_RUN: "false"
+      # --- Server / logging ---
+      PORT: "8000"
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+    ports:
+      - "8765:8000"
+    volumes:
+      - mealie-mcp-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mealie-mcp-data:

@@ -1,6 +1,7 @@
 # Docker Compose for mealie-mcp. Works with `docker compose up -d` and can be
 # pasted (with values filled in) into TrueNAS SCALE > Apps > Discover Apps >
-# Custom App > "Install via YAML". See README.md for step-by-step instructions.
+# Custom App > "Install via YAML". See README.md for step-by-step instructions
+# (deploy/truenas-app.yaml is a ready-to-paste version for TrueNAS).
 services:
   mealie-mcp:
     image: crashandburnds92/mealie-mcp:latest
