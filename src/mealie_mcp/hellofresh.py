@@ -475,9 +475,22 @@ class HelloFreshClient:
         # Pre-score on search data, then verify the most promising candidates against the real page.
         target, target_sub = normalise(name), _strip_with(subtitle) if subtitle else None
         full_target = normalise(f"{name} {subtitle}") if subtitle else None
+
+        def prescore(c: Candidate) -> tuple[float, float]:
+            name_score = fuzz.token_sort_ratio(target, title_core(c.name, c.headline)) if target and c.name else 0.0
+            sub_score = fuzz.token_sort_ratio(target_sub, _strip_with(c.headline)) if target_sub and c.headline else 0.0
+            return name_score, sub_score
+
+        # Collapse re-runs (new ids, same page) before choosing what to verify, so duplicates don't use up the
+        # verification slots, and verify the best title + subtitle candidates first.
+        best: dict[str, tuple[tuple[float, float], Candidate]] = {}
         for c in candidates:
-            c.name_score = fuzz.token_sort_ratio(target, title_core(c.name, c.headline)) if target and c.name else 0.0
-        candidates.sort(key=lambda c: c.name_score, reverse=True)
+            score = prescore(c)
+            c.name_score = score[0]
+            if c.url not in best or score > best[c.url][0]:
+                best[c.url] = (score, c)
+        ranked = sorted(best.values(), key=lambda item: item[0], reverse=True)
+        candidates = [c for _, c in ranked]
         to_verify = [c for c in candidates if c.source == "provided_url" or c.name_score >= 60][:5]
         details_by_url: dict[str, dict[str, Any]] = {}
         for c in to_verify:

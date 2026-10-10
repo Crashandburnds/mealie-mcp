@@ -120,3 +120,25 @@ THAI_SEARCH_API = {
         for rid in ("6616643417fb871fe34f3a15", "65b90240d1da3988cdd8db96")
     ]
 }
+
+
+# More re-runs than verification slots, ahead of the exact page in search order (live, 2026-10-10).
+THAI_EXACT_ID = "649afbd5461c4ddf323098f5"
+THAI_EXACT_URL = f"{HF}/recipes/ultimate-thai-green-style-chicken-curry-{THAI_EXACT_ID}"
+THAI_EXACT_PAGE = recipe_page(
+    THAI_EXACT_ID,
+    "Ultimate Thai Green Style Chicken Curry with Mangetout, Jasmine Rice and Peanuts",
+    "with Mangetout, Jasmine Rice and Peanuts",
+)
+THAI_CROWDED_SEARCH = {
+    "items": [dict(THAI_SEARCH_API["items"][1], id=f"{i:024x}") for i in range(8)]
+    + THAI_SEARCH_API["items"][:1]
+    + [
+        {
+            "id": THAI_EXACT_ID,
+            "name": "Ultimate Thai Green Style Chicken Curry",
+            "headline": "with Mangetout, Jasmine Rice and Peanuts",
+            "websiteUrl": THAI_EXACT_URL,
+        }
+    ]
+}

@@ -245,3 +245,34 @@ async def test_variant_with_similar_subtitle_is_never_imported(settings, fake_me
     assert set(alts) == {THAI_ZESTY_URL, THAI_OLD_URL}  # re-runs collapsed
     # The old page is judged by what it shows (Tenderstem), not the search listing's headline.
     assert "Tenderstem" in alts[THAI_OLD_URL]["headline"]
+
+
+async def test_exact_page_found_behind_many_reruns(settings, fake_mealie, router):
+    from .hf_fixtures import (
+        THAI_CROWDED_SEARCH,
+        THAI_EXACT_PAGE,
+        THAI_EXACT_URL,
+        THAI_OLD_PAGE,
+        THAI_OLD_URL,
+        THAI_ZESTY_PAGE,
+        THAI_ZESTY_URL,
+    )
+
+    router.get(f"{HF}/recipes").mock(return_value=httpx.Response(200, text=HOME_PAGE))
+    router.get(f"{HF}/gw/recipes/recipes/search").mock(return_value=httpx.Response(200, json=THAI_CROWDED_SEARCH))
+    router.get(THAI_ZESTY_URL).mock(return_value=httpx.Response(200, text=THAI_ZESTY_PAGE))
+    router.get(THAI_OLD_URL).mock(return_value=httpx.Response(200, text=THAI_OLD_PAGE))
+    router.get(THAI_EXACT_URL).mock(return_value=httpx.Response(200, text=THAI_EXACT_PAGE))
+    server = build_server(
+        settings, mealie=MealieClient(MEALIE, TOKEN, max_retries=1), hellofresh=HelloFreshClient(HF, min_interval=0)
+    )
+    out = await call(
+        server,
+        "hellofresh_import",
+        name="Ultimate Thai Green Style Chicken Curry",
+        subtitle="with Mangetout, Jasmine Rice and Peanuts",
+        dry_run=True,
+    )
+    assert out["status"] == "matched", out
+    assert out["match"]["url"] == THAI_EXACT_URL
+    assert out["import_status"] == "dry_run"
