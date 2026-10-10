@@ -439,7 +439,7 @@ class HelloFreshClient:
         subtitle: str | None = None,
         *,
         candidate_urls: list[str] | None = None,
-        limit: int = 10,
+        limit: int = 25,  # HelloFresh lists many re-runs; 10 can miss the exact variant
         include_details: bool = False,
     ) -> MatchResult:
         name = " ".join((name or "").split())
@@ -491,7 +491,7 @@ class HelloFreshClient:
                 best[c.url] = (score, c)
         ranked = sorted(best.values(), key=lambda item: item[0], reverse=True)
         candidates = [c for _, c in ranked]
-        to_verify = [c for c in candidates if c.source == "provided_url" or c.name_score >= 60][:5]
+        to_verify = [c for c in candidates if c.source == "provided_url" or c.name_score >= 60][:6]
         details_by_url: dict[str, dict[str, Any]] = {}
         for c in to_verify:
             try:
