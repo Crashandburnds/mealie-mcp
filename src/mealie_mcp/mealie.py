@@ -201,9 +201,9 @@ class MealieClient:
         group = await self._group()
         return {
             "page": data.get("page", page),
-            "per_page": data.get("perPage", per_page),
+            "per_page": _get(data, "per_page", "perPage", default=per_page),
             "total": data.get("total", 0),
-            "total_pages": data.get("totalPages", 0),
+            "total_pages": _get(data, "total_pages", "totalPages", default=0),
             "recipes": [self._summary(item, group) for item in data.get("items", [])],
         }
 
@@ -245,7 +245,7 @@ class MealieClient:
         }
 
     # ------------------------------------------------------------ duplicates
-    async def find_duplicates(self, *, url: str | None = None, name: str | None = None) -> list[dict[str, Any]]:
+    async def find_duplicates(self, *, url: str | None = None, name: str | list[str] | None = None) -> list[dict[str, Any]]:
         """Find recipes that already exist, by source URL (exact/HelloFresh id) and by exact name."""
         found: dict[str, dict[str, Any]] = {}
         group = await self._group()
@@ -274,11 +274,14 @@ class MealieClient:
                 if same:
                     found[item["slug"]] = {**self._summary(item, group), "match": "source_url"}
 
-        if name:
-            target = _norm_name(name)
-            data = (await self._request("GET", "/api/recipes", params={"search": name, "perPage": 50})).json()
+        names = [name] if isinstance(name, str) else [n for n in (name or []) if n]
+        if names:
+            targets = {_norm_name(n) for n in names}
+            # The shortest name is the broadest search; Mealie's search matches substrings.
+            query = min(names, key=len)
+            data = (await self._request("GET", "/api/recipes", params={"search": query, "perPage": 50})).json()
             for item in data.get("items", []):
-                if _norm_name(item.get("name") or "") == target and item["slug"] not in found:
+                if _norm_name(item.get("name") or "") in targets and item["slug"] not in found:
                     found[item["slug"]] = {**self._summary(item, group), "match": "same_name"}
         return list(found.values())
 
@@ -287,7 +290,7 @@ class MealieClient:
         for page in range(1, max_pages + 1):
             data = (await self._request("GET", "/api/recipes", params={"page": page, "perPage": MAX_PER_PAGE})).json()
             matches += [i for i in data.get("items", []) if needle in (i.get("orgURL") or "")]
-            if page >= data.get("totalPages", 0):
+            if page >= _get(data, "total_pages", "totalPages", default=0):
                 break
         return matches
 
@@ -330,7 +333,12 @@ class MealieClient:
         return slug
 
     async def import_url(
-        self, url: str, *, dry_run: bool = False, skip_duplicates: bool = True, expected_name: str | None = None
+        self,
+        url: str,
+        *,
+        dry_run: bool = False,
+        skip_duplicates: bool = True,
+        expected_name: str | list[str] | None = None,
     ) -> ImportOutcome:
         duplicates = await self.find_duplicates(url=url, name=expected_name)
         if duplicates and skip_duplicates:
@@ -391,6 +399,14 @@ class MealieClient:
             message="Imported successfully.",
             warnings=_completeness_warnings(summary) or None,
         )
+
+
+def _get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Mealie's pagination fields are snake_case; accept camelCase too."""
+    for key in keys:
+        if key in data:
+            return data[key]
+    return default
 
 
 def _completeness_warnings(summary: dict[str, Any]) -> list[str]:

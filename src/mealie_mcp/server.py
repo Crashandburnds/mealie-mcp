@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse
 from . import __version__
 from .auth import OwnerOAuthProvider
 from .config import Settings
-from .hellofresh import HelloFreshClient, HelloFreshError
+from .hellofresh import HelloFreshClient, HelloFreshError, title_core
 from .logging_setup import log
 from .mealie import MealieClient, MealieError
 from .net import OutboundBlockedError, UrlValidationError, validate_hellofresh_url, validate_recipe_url
@@ -285,7 +285,7 @@ def build_server(
             return out
         target = result.match.url
         clean = await check_import_url(target)
-        outcome = await mealie.import_url(clean, dry_run=effective_dry_run(dry_run), expected_name=result.match.name)
+        outcome = await mealie.import_url(clean, dry_run=effective_dry_run(dry_run), expected_name=_names_for(result.match, name))
         out["import_status"] = outcome.status
         out["import"] = outcome.to_dict()
         return out
@@ -342,6 +342,15 @@ def build_server(
             return JSONResponse({"status": "degraded", "mealie": "unavailable"}, status_code=503)
 
     return mcp
+
+
+def _names_for(match: Any, requested: str) -> list[str]:
+    """Names an existing copy of this recipe might be saved under in Mealie."""
+    names = {match.name, requested}
+    if match.headline:
+        names.add(f"{title_core(match.name, match.headline)} {match.headline}")
+        names.add(title_core(match.name, match.headline))
+    return [n for n in names if n]
 
 
 def _summarise(results: list[dict[str, Any]]) -> dict[str, int]:

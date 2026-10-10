@@ -117,6 +117,15 @@ def _strip_with(text: str) -> str:
     return re.sub(r"^with\s+", "", normalise(text))
 
 
+def title_core(name: str | None, headline: str | None) -> str:
+    """Normalised title without the subtitle. HelloFresh pages often title a recipe
+    "X  with Y and Z", repeating the headline; strip it so X can be compared exactly."""
+    n, h = normalise(name), normalise(headline)
+    if h and n.endswith(h) and len(n) > len(h):
+        return n[: -len(h)].strip()
+    return n
+
+
 def split_title(name: str) -> tuple[str, str | None]:
     """'X with Y and Z' -> ('X', 'with Y and Z')."""
     match = re.match(r"^(.*?)\s+(with\s+.+)$", name.strip(), re.I)
@@ -458,8 +467,9 @@ class HelloFreshClient:
 
         # Pre-score on search data, then verify the most promising candidates against the real page.
         target, target_sub = normalise(name), _strip_with(subtitle) if subtitle else None
+        full_target = normalise(f"{name} {subtitle}") if subtitle else None
         for c in candidates:
-            c.name_score = fuzz.token_sort_ratio(target, normalise(c.name)) if target and c.name else 0.0
+            c.name_score = fuzz.token_sort_ratio(target, title_core(c.name, c.headline)) if target and c.name else 0.0
         candidates.sort(key=lambda c: c.name_score, reverse=True)
         to_verify = [c for c in candidates if c.source == "provided_url" or c.name_score >= 60][:5]
         details_by_url: dict[str, dict[str, Any]] = {}
@@ -475,9 +485,16 @@ class HelloFreshClient:
             c.total_time = details.get("total_time") or c.total_time
             c.image = details.get("image") or c.image
             details_by_url[c.url] = details
+        # HelloFresh lists re-runs of a recipe under new ids that resolve to the same page: keep one per URL.
+        unique: dict[str, Candidate] = {}
         for c in candidates:
-            c.exact_name = bool(target) and normalise(c.name) == target
-            c.name_score = fuzz.token_sort_ratio(target, normalise(c.name)) if target else 0.0
+            if c.url not in unique or (c.verified and not unique[c.url].verified):
+                unique[c.url] = c
+        candidates = list(unique.values())
+        for c in candidates:
+            core = title_core(c.name, c.headline)
+            c.exact_name = bool(target) and (core == target or (full_target is not None and normalise(c.name) == full_target))
+            c.name_score = fuzz.token_sort_ratio(target, core) if target else 0.0
             if target_sub and c.headline:
                 c.subtitle_score = float(fuzz.token_set_ratio(target_sub, _strip_with(c.headline)))
 

@@ -116,7 +116,8 @@ class FakeMealie:
         if f:
             needle = f.split('"%')[1].split('%"')[0]
             items = [i for i in items if needle in (i["orgURL"] or "")]
-        return httpx.Response(200, json={"page": 1, "perPage": 50, "total": len(items), "totalPages": 1, "items": items})
+        # Real Mealie pagination fields are snake_case.
+        return httpx.Response(200, json={"page": 1, "per_page": 50, "total": len(items), "total_pages": 1, "items": items})
 
     def _get(self, req):
         if err := self._auth(req):

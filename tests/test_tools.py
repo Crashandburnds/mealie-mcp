@@ -11,7 +11,7 @@ from mealie_mcp.mealie import MealieClient
 from mealie_mcp.server import build_server
 
 from .conftest import BREAST_URL, HF, MEALIE, THIGH_URL, TOKEN
-from .hf_fixtures import BREAST_PAGE, HOME_PAGE, SEARCH_API, SEARCH_HTML, THIGH_PAGE
+from .hf_fixtures import BREAST_PAGE, HOME_PAGE, LIVE_SEARCH_API, LIVE_THIGH_PAGE, SEARCH_API, SEARCH_HTML, THIGH_PAGE
 
 SUBTITLE = "With Cumin Roast Potatoes, Carrots and Green Beans"
 
@@ -181,3 +181,43 @@ async def test_token_never_logged(mcp, fake_mealie, caplog):
     await call(mcp, "mealie_status")
     logging.getLogger("t").warning("header was Bearer %s", TOKEN)
     assert TOKEN not in caplog.text
+
+
+@pytest.fixture
+def live_site(router):
+    router.get(f"{HF}/recipes").mock(return_value=httpx.Response(200, text=HOME_PAGE))
+    router.get(f"{HF}/gw/recipes/recipes/search").mock(return_value=httpx.Response(200, json=LIVE_SEARCH_API))
+    router.get(THIGH_URL).mock(return_value=httpx.Response(200, text=LIVE_THIGH_PAGE))
+
+
+@pytest.fixture
+def live_mcp(settings, fake_mealie, live_site):
+    return build_server(
+        settings, mealie=MealieClient(MEALIE, TOKEN, max_retries=1), hellofresh=HelloFreshClient(HF, min_interval=0)
+    )
+
+
+async def test_live_page_title_with_headline_matches_once(live_mcp, fake_mealie):
+    out = await call(live_mcp, "hellofresh_import", name="Curried Chicken Thigh Traybake", subtitle=SUBTITLE, dry_run=True)
+    assert out["status"] == "matched", out
+    assert out["match"]["url"] == THIGH_URL
+    assert "alternatives" not in out  # re-runs collapsed into one
+    assert out["import_status"] == "dry_run"
+
+
+async def test_existing_copy_under_full_title_is_a_duplicate(live_mcp, fake_mealie):
+    # Saved earlier from a share.google link, so only the name can identify it.
+    fake_mealie.recipes["c"] = {
+        "slug": "c",
+        "name": "Curried Chicken Thigh Traybake with Cumin Roast Potatoes, Carrots and Green Beans",
+        "orgURL": "https://share.google/GnIRHb7l2ubXViAAk",
+    }
+    out = await call(live_mcp, "hellofresh_import", name="Curried Chicken Thigh Traybake", subtitle=SUBTITLE)
+    assert out["import_status"] == "duplicate"
+    assert fake_mealie.created == []
+
+
+async def test_pagination_fields(live_mcp, fake_mealie):
+    fake_mealie.recipes["a"] = {"slug": "a", "name": "A", "orgURL": None}
+    out = await call(live_mcp, "mealie_list_recipes")
+    assert out["total_pages"] == 1 and out["per_page"] == 50
