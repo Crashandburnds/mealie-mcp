@@ -46,6 +46,7 @@ It reports back what was imported, already present, not found or failed.
 | `hellofresh_match` | Find **and verify** the exact recipe for a title (+ subtitle); returns ingredients, quantities, steps, times, servings, image, nutrition | no |
 | `hellofresh_import` | Match → verify → duplicate-check → import (`dry_run` supported) | adds |
 | `hellofresh_bulk_import` | The same for up to 20 recipe cards in one call | adds |
+| `mealie_create_recipe` | Create a recipe from structured data, e.g. transcribed from a cookbook page photo (`dry_run` supported) | adds |
 
 All "adds" tools skip recipes that already exist (by source URL, HelloFresh recipe id, or exact name) and never modify
 existing ones. Set `DRY_RUN=true` to force every import into preview mode.
@@ -99,7 +100,7 @@ in `/run/secrets/<lowercase_name>`, for example `/run/secrets/mealie_api_token`.
 | `STATIC_TOKENS` | | | Optional comma-separated bearer tokens (≥ 32 chars) for scripts / other clients |
 | `OAUTH_ALLOWED_REDIRECT_HOSTS` | | `chatgpt.com,chat.openai.com,claude.ai,claude.com` | |
 | `OAUTH_ALLOW_LOOPBACK_REDIRECTS` | | `true` | Allow `http://localhost:<port>` sign-in callbacks (Claude Code CLI, MCP Inspector) |
-| `IMPORT_ALLOWED_DOMAINS` | | `hellofresh.co.uk` | Add more domains, or `*` for any public site |
+| `IMPORT_ALLOWED_DOMAINS` | | `hellofresh.co.uk,pinchofnom.com` | Add more domains, or `*` for any public site |
 | `DRY_RUN` | | `false` | Force all imports into preview mode |
 | `BULK_IMPORT_MAX` | | `50` | |
 | `MEALIE_IMPORT_INCLUDE_TAGS` | | `true` | Keep tags scraped from the recipe page |
@@ -152,7 +153,7 @@ services:
       AUTH_MODE: oauth
       OWNER_PASSWORD: CHANGE_ME_long_password
       AUTH_SECRET: CHANGE_ME_64_hex_chars_from_openssl
-      IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk
+      IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk,pinchofnom.com
       DRY_RUN: "false"
       PORT: "8000"
       LOG_LEVEL: INFO

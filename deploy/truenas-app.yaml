@@ -20,7 +20,7 @@ services:
       OAUTH_ALLOWED_REDIRECT_HOSTS: chatgpt.com,chat.openai.com,claude.ai,claude.com
       OAUTH_ALLOW_LOOPBACK_REDIRECTS: "true"
       # --- Import policy ---
-      IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk
+      IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk,pinchofnom.com
       DRY_RUN: "false"
       # --- Server / logging ---
       PORT: "8000"

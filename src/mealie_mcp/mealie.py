@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -315,6 +316,24 @@ class MealieClient:
             "has_nutrition": bool(data.get("nutrition")),
             "has_image": bool(data.get("image")),
         }
+
+    async def create_from_schema(self, recipe: dict[str, Any]) -> str:
+        """Create a recipe from a schema.org Recipe object (e.g. transcribed from a cookbook photo)."""
+        payload = {"data": json.dumps(recipe), "includeTags": True, "includeCategories": self.include_categories}
+        async with self._import_lock:
+            try:
+                response = await self._request(
+                    "POST", "/api/recipes/create/html-or-json", json=payload, timeout=self.import_timeout, retry=False
+                )
+            except MealieError as exc:
+                if exc.status == 400:
+                    exc.kind = "create_failed"
+                raise
+        slug = response.json()
+        if not isinstance(slug, str) or not slug:
+            raise MealieError("Mealie returned an unexpected response to the create request", kind="unexpected_response")
+        log(logger, logging.INFO, "recipe created from data", slug=slug)
+        return slug
 
     async def create_from_url(self, url: str) -> str:
         payload = {"url": url, "includeTags": self.include_tags, "includeCategories": self.include_categories}

@@ -95,6 +95,8 @@ class FakeMealie:
         r.get(f"{MEALIE}/api/recipes").mock(side_effect=self._list)
         r.post(f"{MEALIE}/api/recipes/create/url").mock(side_effect=self._create)
         r.post(f"{MEALIE}/api/recipes/test-scrape-url").mock(side_effect=self._test_scrape)
+        r.post(f"{MEALIE}/api/recipes/create/html-or-json").mock(side_effect=self._create_from_data)
+        self.created_data: list[dict] = []
         r.get(url__regex=rf"{MEALIE}/api/recipes/[^/?]+$").mock(side_effect=self._get)
 
     def _auth(self, req) -> httpx.Response | None:
@@ -139,6 +141,17 @@ class FakeMealie:
         if THIGH_ID in body["url"]:
             name = "Curried Chicken Thigh Traybake"
         self.recipes[slug] = {"slug": slug, "name": name, "orgURL": body["url"]}
+        self.created.append(slug)
+        return httpx.Response(201, json=slug)
+
+    def _create_from_data(self, req):
+        if err := self._auth(req):
+            return err
+        body = json.loads(req.content)
+        recipe = json.loads(body["data"])
+        self.created_data.append(recipe)
+        slug = recipe["name"].lower().replace(" ", "-")
+        self.recipes[slug] = {"slug": slug, "name": recipe["name"], "orgURL": None}
         self.created.append(slug)
         return httpx.Response(201, json=slug)
 

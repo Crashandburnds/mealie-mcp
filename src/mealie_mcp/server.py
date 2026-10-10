@@ -41,12 +41,36 @@ Typical workflow for HelloFresh recipe cards (photos or names):
    recipe URL yourself (e.g. via web search), pass it as `url` and it will be verified.
    For many recipes, send batches of about 5 per hellofresh_bulk_import call.
 4. Existing recipes are never modified or deleted; duplicates are reported and skipped.
+For recipes from cookbooks or other sources without a web page, transcribe the page faithfully and use
+mealie_create_recipe (dry_run=true first if the user wants to check the transcription). If the recipe is
+also published online on an allowed domain, prefer mealie_import_url.
 Report imported, duplicate, not-found and failed recipes back to the user.
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 READ_ONLY_WEB = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 IMPORTS = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
+
+
+NUTRITION_KEYS = {
+    "calories": "calories",
+    "protein": "proteinContent",
+    "fat": "fatContent",
+    "saturated_fat": "saturatedFatContent",
+    "carbohydrates": "carbohydrateContent",
+    "sugar": "sugarContent",
+    "fibre": "fiberContent",
+    "fiber": "fiberContent",
+    "salt": "sodiumContent",
+    "sodium": "sodiumContent",
+}
+
+
+def _iso_minutes(minutes: int | None) -> str | None:
+    if not minutes:
+        return None
+    hours, mins = divmod(int(minutes), 60)
+    return "PT" + (f"{hours}H" if hours else "") + (f"{mins}M" if mins else "")
 
 
 class RecipeCard(BaseModel):
@@ -240,6 +264,103 @@ def build_server(
             seen.add(key)
             results.append(await one(raw))
         return {"ok": True, "summary": _summarise(results), "results": results}
+
+    # ------------------------------------------------------- Manual / books
+    @mcp.tool(
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+    )
+    @_safe
+    async def mealie_create_recipe(
+        name: Annotated[str, Field(min_length=2, max_length=200, description="Recipe title")],
+        ingredients: Annotated[
+            list[str],
+            Field(
+                min_length=1,
+                max_length=80,
+                description="One ingredient per entry, with quantity, e.g. '400g chicken breast, diced'",
+            ),
+        ],
+        instructions: Annotated[list[str], Field(min_length=1, max_length=40, description="One step per entry, in order")],
+        description: Annotated[str | None, Field(max_length=2000)] = None,
+        source: Annotated[
+            str | None, Field(max_length=300, description="Where it came from, e.g. 'Pinch of Nom: Everyday Light, page 112'")
+        ] = None,
+        servings: Annotated[int | None, Field(ge=1, le=50)] = None,
+        prep_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
+        cook_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
+        total_minutes: Annotated[int | None, Field(ge=0, le=2880)] = None,
+        nutrition: Annotated[
+            dict[str, str] | None,
+            Field(
+                description="Per serving, e.g. {'calories': '389 kcal', 'protein': '32g'}. Keys: calories, protein, fat, "
+                "saturated_fat, carbohydrates, sugar, fibre, salt"
+            ),
+        ] = None,
+        tags: Annotated[list[str] | None, Field(max_length=20, description="e.g. ['Pinch of Nom', 'Slow Cooker']")] = None,
+        dry_run: Annotated[bool, Field(description="Preview only; nothing is saved")] = False,
+        skip_duplicates: bool = True,
+    ) -> dict[str, Any]:
+        """Create a new Mealie recipe from structured data, e.g. transcribed from a cookbook page photo.
+
+        Use this for recipes that have no web page to import (books, handwritten cards). Transcribe exactly what
+        the page says; do not invent quantities or steps. Existing recipes are never modified; a recipe with the
+        same name is reported as a duplicate and skipped.
+        """
+        clean = [i.strip() for i in ingredients if i and i.strip()]
+        steps = [s.strip() for s in instructions if s and s.strip()]
+        desc = (description or "").strip()
+        if source:
+            desc = f"{desc}\n\nSource: {source.strip()}".strip()
+        recipe: dict[str, Any] = {
+            "@context": "https://schema.org",
+            "@type": "Recipe",
+            "name": name.strip(),
+            "description": desc or None,
+            "recipeIngredient": clean,
+            "recipeInstructions": [{"@type": "HowToStep", "text": s} for s in steps],
+            "recipeYield": str(servings) if servings else None,
+            "prepTime": _iso_minutes(prep_minutes),
+            "cookTime": _iso_minutes(cook_minutes),
+            "totalTime": _iso_minutes(total_minutes or ((prep_minutes or 0) + (cook_minutes or 0)) or None),
+            "keywords": ", ".join(t.strip() for t in tags or [] if t.strip()) or None,
+        }
+        if nutrition:
+            nut = {NUTRITION_KEYS.get(k.lower().strip(), k): str(v) for k, v in nutrition.items() if v}
+            recipe["nutrition"] = {"@type": "NutritionInformation", **nut}
+        recipe = {k: v for k, v in recipe.items() if v not in (None, "", [])}
+
+        duplicates = await mealie.find_duplicates(name=name)
+        if duplicates and skip_duplicates:
+            return {
+                "ok": True,
+                "status": "duplicate",
+                "duplicates": duplicates,
+                "message": "A recipe with this name already exists; nothing was created.",
+            }
+        if effective_dry_run(dry_run):
+            return {
+                "ok": True,
+                "status": "dry_run",
+                "preview": recipe,
+                "duplicates": duplicates or None,
+                "message": "Dry run: nothing was created.",
+            }
+        slug = await mealie.create_from_schema(recipe)
+        created = await mealie.get_recipe(slug)
+        warnings = []
+        if len(created.get("ingredients") or []) < len(clean):
+            warnings.append("Mealie stored fewer ingredients than were sent; check the recipe")
+        if len(created.get("instructions") or []) < len(steps):
+            warnings.append("Mealie stored fewer steps than were sent; check the recipe")
+        return {
+            "ok": True,
+            "status": "created",
+            "slug": slug,
+            "mealie_url": created.get("mealie_url"),
+            "ingredient_count": len(created.get("ingredients") or []),
+            "instruction_count": len(created.get("instructions") or []),
+            "warnings": warnings or None,
+        }
 
     # ------------------------------------------------------------ HelloFresh
     @mcp.tool(annotations=READ_ONLY_WEB)

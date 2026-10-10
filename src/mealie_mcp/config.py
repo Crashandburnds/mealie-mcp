@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # --- Import policy ----------------------------------------------------
     # Domains a recipe URL may come from. "*" allows any public https site
     # (private / LAN addresses are always refused).
-    import_allowed_domains: CsvList = ["hellofresh.co.uk"]
+    import_allowed_domains: CsvList = ["hellofresh.co.uk", "pinchofnom.com"]
     bulk_import_max: int = 50
     dry_run: bool = False  # force every import tool into dry-run mode
 

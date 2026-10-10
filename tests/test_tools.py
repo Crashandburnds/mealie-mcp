@@ -276,3 +276,32 @@ async def test_exact_page_found_behind_many_reruns(settings, fake_mealie, router
     assert out["status"] == "matched", out
     assert out["match"]["url"] == THAI_EXACT_URL
     assert out["import_status"] == "dry_run"
+
+
+async def test_create_recipe_from_book_page(mcp, fake_mealie):
+    args = dict(
+        name="Chicken Balti",
+        ingredients=["400g diced chicken breast", "1 onion, sliced", "2 tbsp balti paste"],
+        instructions=["Fry the onion.", "Add the chicken and paste.", "Simmer for 20 minutes."],
+        source="Pinch of Nom, page 112",
+        servings=4,
+        prep_minutes=10,
+        cook_minutes=35,
+        nutrition={"calories": "275 kcal", "protein": "32g"},
+        tags=["Pinch of Nom"],
+    )
+    dry = await call(mcp, "mealie_create_recipe", dry_run=True, **args)
+    assert dry["status"] == "dry_run" and fake_mealie.created == []
+    assert dry["preview"]["totalTime"] == "PT45M"
+    assert dry["preview"]["nutrition"]["proteinContent"] == "32g"
+    assert dry["preview"]["description"].endswith("Source: Pinch of Nom, page 112")
+
+    out = await call(mcp, "mealie_create_recipe", **args)
+    assert out["status"] == "created", out
+    sent = fake_mealie.created_data[0]
+    assert sent["@type"] == "Recipe" and sent["recipeYield"] == "4"
+    assert [s["text"] for s in sent["recipeInstructions"]][0] == "Fry the onion."
+
+    again = await call(mcp, "mealie_create_recipe", **args)
+    assert again["status"] == "duplicate"
+    assert len(fake_mealie.created) == 1
