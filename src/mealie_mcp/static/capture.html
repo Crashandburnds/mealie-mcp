@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16a34a">
+<title>Recipe Capture</title>
+<link rel="manifest" href="/capture/manifest.webmanifest">
+<link rel="icon" href="/capture/icon-192.png">
+<link rel="apple-touch-icon" href="/capture/icon-192.png">
+<style>
+:root{--bg:#f6f7f6;--card:#fff;--text:#18181b;--muted:#5b6170;--line:#e4e4e7;--accent:#16a34a;--accent-text:#fff;
+--ok:#15803d;--okbg:#dcfce7;--warn:#a16207;--warnbg:#fef9c3;--bad:#b91c1c;--badbg:#fee2e2;--info:#1d4ed8;--infobg:#dbeafe}
+@media (prefers-color-scheme:dark){:root{--bg:#111312;--card:#1c1f1e;--text:#f4f4f5;--muted:#a1a1aa;--line:#2e3330;
+--accent:#22c55e;--accent-text:#052e14;--ok:#86efac;--okbg:#14532d;--warn:#fde68a;--warnbg:#713f12;--bad:#fca5a5;--badbg:#7f1d1d;--info:#93c5fd;--infobg:#1e3a8a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+padding:env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 96px)}
+header{padding:16px;display:flex;align-items:center;justify-content:space-between}
+h1{font-size:1.25rem;margin:0}
+main{padding:0 16px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+button,.btn{font:inherit;border:0;border-radius:12px;padding:14px 16px;cursor:pointer;background:var(--line);color:var(--text)}
+.primary{background:var(--accent);color:var(--accent-text);font-weight:600}
+.big{width:100%;font-size:1.1rem;padding:18px}
+.row{display:flex;gap:10px}.row>*{flex:1}
+input[type=text],input[type=password]{width:100%;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--line);
+background:var(--bg);color:var(--text)}
+label.check{display:flex;gap:10px;align-items:center;margin-top:10px;color:var(--muted)}
+.muted{color:var(--muted);font-size:.9rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:12px}
+.thumb{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;background:var(--line)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb button{position:absolute;top:4px;right:4px;padding:2px 8px;border-radius:999px;background:#000a;color:#fff}
+.sticky{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+background:linear-gradient(transparent,var(--bg) 30%)}
+.sticky .inner{max-width:640px;margin:0 auto}
+.item{padding:12px 0;border-top:1px solid var(--line)}.item:first-child{border-top:0}
+.chip{display:inline-block;font-size:.8rem;font-weight:600;padding:2px 10px;border-radius:999px;margin-right:6px}
+.s-imported,.s-created{background:var(--okbg);color:var(--ok)}
+.s-duplicate,.s-dry_run,.s-skipped{background:var(--infobg);color:var(--info)}
+.s-needs_review{background:var(--warnbg);color:var(--warn)}
+.s-failed{background:var(--badbg);color:var(--bad)}
+.s-queued,.s-reading{background:var(--line);color:var(--muted)}
+.alt{display:flex;gap:8px;align-items:center;margin-top:8px}.alt span{flex:1;font-size:.9rem}
+.alt button{padding:8px 12px}
+a{color:var(--accent)}
+.err{color:var(--bad)}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header><h1>📸 Recipe Capture</h1><button id="logout" class="hidden" style="padding:8px 12px">Sign out</button></header>
+<main>
+  <section id="login" class="card hidden">
+    <p>Sign in with your Mealie MCP owner password.</p>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="Owner password">
+    <p id="loginErr" class="err"></p>
+    <button id="loginBtn" class="primary big">Sign in</button>
+  </section>
+
+  <section id="notConfigured" class="card hidden">
+    <p><b>Photo reading isn't set up.</b> Add <code>CLAUDE_API_TOKEN</code> to the server's environment and restart it.</p>
+  </section>
+
+  <section id="capture" class="hidden">
+    <div class="card">
+      <div class="row">
+        <button id="cameraBtn" class="primary big">📷 Camera</button>
+        <button id="galleryBtn" class="big">🖼️ Gallery</button>
+      </div>
+      <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden">
+      <input id="galleryInput" type="file" accept="image/*" multiple class="hidden">
+      <p class="muted" id="countText">HelloFresh cards and cookbook pages. One recipe per photo.</p>
+      <div class="grid" id="thumbs"></div>
+    </div>
+    <div class="card">
+      <input id="book" type="text" placeholder="Book name (cookbooks, optional)">
+      <label class="check"><input id="dryRun" type="checkbox"> Preview only (don't save to Mealie)</label>
+    </div>
+    <div class="card hidden" id="resultsCard"><div id="results"></div></div>
+  </section>
+</main>
+<div class="sticky hidden" id="bar"><div class="inner"><button id="sendBtn" class="primary big" disabled>Import</button></div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const H = {"x-mealie-capture": "1"};
+const MAX_EDGE = 2000;
+let photos = [];          // {blob, url}
+let maxImages = 20;
+let polling = null;
+
+function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+function show(id, on) { $(id).classList.toggle("hidden", !on); }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {credentials: "same-origin", ...opts});
+  let body = {};
+  try { body = await res.json(); } catch (e) {}
+  if (res.status === 401) { showLogin(); throw new Error("Please sign in again."); }
+  if (!res.ok) throw new Error(body.error || body.message || `Error ${res.status}`);
+  return body;
+}
+
+function showLogin() { show("login", true); show("capture", false); show("bar", false); show("logout", false); }
+
+async function init() {
+  const s = await api("/capture/api/session");
+  maxImages = s.max_images || 20;
+  if (!s.authenticated) return showLogin();
+  show("login", false); show("logout", s.auth_required);
+  if (!s.configured) { show("notConfigured", true); return; }
+  show("capture", true); show("bar", true);
+  $("book").value = load("book") || "";
+  const last = load("lastJob");
+  if (last) pollJob(last, true);
+}
+
+$("loginBtn").onclick = async () => {
+  $("loginErr").textContent = "";
+  try {
+    await api("/capture/api/login", {method: "POST", headers: {...H, "content-type": "application/json"},
+      body: JSON.stringify({password: $("pw").value})});
+    $("pw").value = ""; init();
+  } catch (e) { $("loginErr").textContent = e.message; }
+};
+$("pw").onkeydown = (e) => { if (e.key === "Enter") $("loginBtn").click(); };
+$("logout").onclick = async () => { await api("/capture/api/logout", {method: "POST", headers: H}).catch(() => {}); showLogin(); };
+$("book").oninput = () => store("book", $("book").value);
+
+$("cameraBtn").onclick = () => $("cameraInput").click();
+$("galleryBtn").onclick = () => $("galleryInput").click();
+$("cameraInput").onchange = (e) => addFiles(e.target.files, e.target);
+$("galleryInput").onchange = (e) => addFiles(e.target.files, e.target);
+
+// Shrink to <= 2000px on the long edge as JPEG: keeps text sharp, uploads fast, avoids size limits.
+async function shrink(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, {imageOrientation: "from-image"}); }
+  catch (e) {
+    bmp = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = URL.createObjectURL(file); });
+  }
+  const w = bmp.width, h = bmp.height, k = Math.min(1, MAX_EDGE / Math.max(w, h));
+  const c = document.createElement("canvas");
+  c.width = Math.round(w * k); c.height = Math.round(h * k);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+}
+
+async function addFiles(list, input) {
+  for (const f of Array.from(list)) {
+    if (photos.length >= maxImages) { alert(`Up to ${maxImages} photos per batch.`); break; }
+    try { const blob = await shrink(f); photos.push({blob, url: URL.createObjectURL(blob)}); }
+    catch (e) { alert(`Couldn't read ${f.name}`); }
+  }
+  input.value = "";
+  renderThumbs();
+}
+
+function renderThumbs() {
+  $("thumbs").innerHTML = "";
+  photos.forEach((p, i) => {
+    const d = document.createElement("div"); d.className = "thumb";
+    const img = document.createElement("img"); img.src = p.url; d.appendChild(img);
+    const x = document.createElement("button"); x.textContent = "✕";
+    x.onclick = () => { URL.revokeObjectURL(p.url); photos.splice(i, 1); renderThumbs(); };
+    d.appendChild(x); $("thumbs").appendChild(d);
+  });
+  const n = photos.length;
+  $("countText").textContent = n ? `${n} photo${n > 1 ? "s" : ""} ready.` : "HelloFresh cards and cookbook pages. One recipe per photo.";
+  $("sendBtn").disabled = !n;
+  $("sendBtn").textContent = n ? `Import ${n} photo${n > 1 ? "s" : ""}` : "Import";
+}
+
+$("sendBtn").onclick = async () => {
+  const fd = new FormData();
+  photos.forEach((p, i) => fd.append("images", p.blob, `photo-${i + 1}.jpg`));
+  fd.append("book", $("book").value.trim());
+  fd.append("dry_run", $("dryRun").checked ? "1" : "0");
+  $("sendBtn").disabled = true; $("sendBtn").textContent = "Uploading…";
+  try {
+    const job = await api("/capture/api/jobs", {method: "POST", headers: H, body: fd});
+    photos.forEach((p) => URL.revokeObjectURL(p.url)); photos = []; renderThumbs();
+    store("lastJob", job.id); renderJob(job); pollJob(job.id);
+  } catch (e) { alert(e.message); renderThumbs(); }
+};
+
+const LABEL = {queued: "Waiting", reading: "Reading…", imported: "Imported", created: "Added", duplicate: "Already in Mealie",
+  dry_run: "Preview OK", needs_review: "Needs review", skipped: "Skipped", failed: "Failed"};
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+function renderJob(job) {
+  show("resultsCard", true);
+  const r = $("results"); r.innerHTML = "";
+  const done = job.items.filter((i) => !["queued", "reading"].includes(i.status)).length;
+  r.appendChild(el("p", "muted", job.done ? `Done${job.dry_run ? " (preview only)" : ""}: ${job.items.length} photo(s).`
+    : `Working… ${done} of ${job.items.length} done. You can leave this page; results are kept.`));
+  job.items.forEach((it) => {
+    const d = el("div", "item");
+    d.appendChild(el("span", `chip s-${it.status}`, LABEL[it.status] || it.status));
+    d.appendChild(el("b", "", it.title || it.filename));
+    if (it.mealie_url) { const a = el("a", "", " Open"); a.href = it.mealie_url; a.target = "_blank"; a.rel = "noopener"; d.appendChild(a); }
+    if (it.message) d.appendChild(el("div", "muted", it.message));
+    (it.warnings || []).forEach((w) => d.appendChild(el("div", "muted", "⚠️ " + w)));
+    (it.alternatives || []).forEach((alt) => {
+      const row = el("div", "alt"); row.appendChild(el("span", "", alt.name));
+      const b = el("button", "", "Import this");
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "…";
+        try { const res = await api("/capture/api/import-url", {method: "POST", headers: {...H, "content-type": "application/json"},
+            body: JSON.stringify({url: alt.url, dry_run: job.dry_run})});
+          b.textContent = res.ok ? (res.status === "duplicate" ? "Already there" : "Done ✓") : "Failed"; }
+        catch (e) { b.textContent = "Failed"; alert(e.message); }
+      };
+      row.appendChild(b); d.appendChild(row);
+    });
+    r.appendChild(d);
+  });
+}
+
+async function pollJob(id, quiet) {
+  clearTimeout(polling);
+  try {
+    const job = await api(`/capture/api/jobs/${encodeURIComponent(id)}`);
+    renderJob(job);
+    if (!job.done) polling = setTimeout(() => pollJob(id, quiet), 2000);
+  } catch (e) { if (!quiet) alert(e.message); }
+}
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/capture/sw.js", {scope: "/capture"}).catch(() => {});
+init().catch((e) => alert(e.message));
+</script>
+</body>
+</html>

@@ -22,6 +22,9 @@ services:
       # --- Import policy ---
       IMPORT_ALLOWED_DOMAINS: hellofresh.co.uk,pinchofnom.com
       DRY_RUN: "false"
+      # --- Phone capture app (/capture): Anthropic API key for reading photos ---
+      # Leave as "" to disable the capture app.
+      CLAUDE_API_TOKEN: ""
       # --- Server / logging ---
       PORT: "8000"
       LOG_LEVEL: INFO

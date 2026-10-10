@@ -15,6 +15,31 @@ It reports back what was imported, already present, not found or failed.
 
 ---
 
+## Phone capture app
+
+`https://mcp.crashtech.co.uk/capture` is a small web app for adding recipes straight from your phone, without
+going through a chat:
+
+1. Open it on your phone and sign in with your **owner password** (the session lasts 30 days).
+2. In Chrome: **⋮ → Add to Home screen**, so it opens full-screen from its own icon.
+3. Tap **📷 Camera** (or **🖼️ Gallery** for several at once), add up to 20 photos, optionally type the book's
+   name, then **Import**.
+
+Photos are shrunk on the phone before upload, so full-resolution camera photos work. On the server, Claude
+reads each photo, and then:
+
+- **HelloFresh cards** go through the same strict matching as `hellofresh_import`.
+- **Cookbook pages** are transcribed and created with `mealie_create_recipe`, with the book and page as the
+  source.
+
+Results show as **Imported / Added / Already in Mealie / Needs review / Failed**. For "Needs review" cards,
+the verified alternatives have an **Import this** button. The batch keeps running if you leave the page.
+Tick **Preview only** to check without saving.
+
+It needs `CLAUDE_API_TOKEN` (an Anthropic API key from console.anthropic.com) in the app's environment.
+API use is billed per photo, separately from any Claude subscription. Without it the page shows
+"not set up". `CLAUDE_MODEL` (default `claude-opus-5-5`) and `CAPTURE_MAX_IMAGES` (default 20) are optional.
+
 ## Contents
 
 1. [Tools](#tools)
@@ -94,6 +119,7 @@ in `/run/secrets/<lowercase_name>`, for example `/run/secrets/mealie_api_token`.
 | `MEALIE_URL` | ✅ | | `https://mealie.crashtech.co.uk` (or LAN URL, see below) |
 | `MEALIE_API_TOKEN` | ✅ | | Mealie → *Profile → Manage API Tokens* |
 | `PUBLIC_BASE_URL` | ✅ | `http://localhost:8000` | `https://mcp.crashtech.co.uk`: must be the exact public origin |
+| `CLAUDE_API_TOKEN` | | | Anthropic API key for the `/capture` phone app; empty disables it |
 | `OWNER_PASSWORD` | ✅ (oauth) | | ≥ 12 chars; typed when you connect Claude / ChatGPT |
 | `AUTH_SECRET` | ✅ (oauth) | | ≥ 32 chars; `openssl rand -hex 32` |
 | `AUTH_MODE` | | `oauth` | `none` only for local testing, **never** on the internet |
@@ -239,7 +265,7 @@ proxy_connect_timeout 30s;
 proxy_send_timeout 300s;
 proxy_read_timeout 300s;
 
-client_max_body_size 1m;
+client_max_body_size 50m;  # photo batches from the /capture app
 ```
 
 NPM already forwards the client IP (`X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`), which the login rate

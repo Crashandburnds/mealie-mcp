@@ -218,6 +218,48 @@ class OwnerOAuthProvider(OAuthProvider):
             self._global_failures.popleft()
         return len(q) >= MAX_FAILURES_PER_IP or len(self._global_failures) >= MAX_FAILURES_GLOBAL
 
+    def check_password(self, ip: str, password: str) -> str:
+        """Check the owner password with brute-force lockout. Returns "ok", "wrong" or "locked"."""
+        if self._locked_out(ip):
+            log(logger, logging.WARNING, "login locked out", ip=ip)
+            return "locked"
+        if not hmac.compare_digest(password.encode(), self._password):
+            now = time.time()
+            self._failures[ip].append(now)
+            self._global_failures.append(now)
+            log(logger, logging.WARNING, "login failed", ip=ip)
+            return "wrong"
+        self._failures.pop(ip, None)
+        return "ok"
+
+    def issue_session(self, purpose: str, ttl: int) -> str:
+        """A signed, expiring session token for first-party pages (e.g. the capture app)."""
+        now = int(time.time())
+        claims = {
+            "iss": self._public_base,
+            "aud": f"{self._public_base}/{purpose}",
+            "sub": "owner",
+            "typ": purpose,
+            "iat": now,
+            "exp": now + ttl,
+            "jti": uuid.uuid4().hex,
+        }
+        return jwt.encode(claims, self._secret, algorithm="HS256")
+
+    def verify_session(self, purpose: str, token: str) -> bool:
+        try:
+            claims = jwt.decode(
+                token,
+                self._secret,
+                algorithms=["HS256"],
+                audience=f"{self._public_base}/{purpose}",
+                issuer=self._public_base,
+                options={"require": ["exp", "iat", "aud", "iss"]},
+            )
+        except jwt.PyJWTError:
+            return False
+        return claims.get("typ") == purpose
+
     def _login_page(self, pending: _Pending, txn: str, error: str | None = None, status: int = 200) -> HTMLResponse:
         client = html.escape(pending.client_name or "An MCP client")
         redirect = urlsplit(str(pending.params.redirect_uri))
@@ -271,19 +313,13 @@ button{{padding:.6rem 1rem;font-size:1rem;border:0;border-radius:8px;margin-righ
                 construct_redirect_uri(str(params.redirect_uri), error="access_denied", state=params.state, iss=self._issuer), 302
             )
         ip = request.client.host if request.client else "unknown"
-        if self._locked_out(ip):
-            log(logger, logging.WARNING, "login locked out", ip=ip)
+        result = self.check_password(ip, str(form.get("password", "")))
+        if result == "locked":
             return self._login_page(pending, txn, "Too many failed attempts. Try again in 15 minutes.", 429)
-        password = str(form.get("password", "")).encode()
-        if not hmac.compare_digest(password, self._password):
-            now = time.time()
-            self._failures[ip].append(now)
-            self._global_failures.append(now)
-            log(logger, logging.WARNING, "login failed", ip=ip)
+        if result == "wrong":
             return self._login_page(pending, txn, "Incorrect password.", 401)
 
         self._pending.pop(txn, None)
-        self._failures.pop(ip, None)
         code = secrets.token_urlsafe(32)
         self._codes[code] = AuthorizationCode(
             code=code,

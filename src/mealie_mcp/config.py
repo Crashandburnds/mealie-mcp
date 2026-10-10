@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
     data_dir: Path = Path("/data")
 
+    # --- Phone capture app (/capture) ------------------------------------
+    # Anthropic API key used to read recipe photos. Capture is disabled when unset.
+    claude_api_token: SecretStr | None = None
+    claude_model: str = "claude-opus-5-5"
+    capture_max_images: int = 20
+
     # --- Logging ----------------------------------------------------------
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"
@@ -96,6 +102,11 @@ class Settings(BaseSettings):
         if not value.startswith(("http://", "https://")):
             raise ValueError("must start with http:// or https://")
         return value
+
+    @field_validator("claude_api_token", "owner_password", "auth_secret", mode="before")
+    @classmethod
+    def _empty_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("mcp_path")
     @classmethod
@@ -128,7 +139,7 @@ class Settings(BaseSettings):
     def secret_values(self) -> list[str]:
         """Every secret, so the log filter can redact them."""
         values = [self.mealie_api_token.get_secret_value()]
-        for s in (self.owner_password, self.auth_secret, *self.static_tokens):
+        for s in (self.owner_password, self.auth_secret, self.claude_api_token, *self.static_tokens):
             if s is not None:
                 values.append(s.get_secret_value())
         return [v for v in values if v]

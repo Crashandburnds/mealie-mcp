@@ -17,11 +17,13 @@ from starlette.responses import JSONResponse
 
 from . import __version__
 from .auth import OwnerOAuthProvider
+from .capture import CaptureApp
 from .config import Settings
 from .hellofresh import HelloFreshClient, HelloFreshError, title_core
 from .logging_setup import log
 from .mealie import MealieClient, MealieError
 from .net import OutboundBlockedError, UrlValidationError, validate_hellofresh_url, validate_recipe_url
+from .vision import RecipeReader
 
 logger = logging.getLogger("mealie_mcp.server")
 
@@ -109,6 +111,7 @@ def build_server(
     *,
     mealie: MealieClient | None = None,
     hellofresh: HelloFreshClient | None = None,
+    reader: RecipeReader | None = None,
 ) -> FastMCP:
     mealie = mealie or MealieClient(
         settings.mealie_url,
@@ -266,46 +269,22 @@ def build_server(
         return {"ok": True, "summary": _summarise(results), "results": results}
 
     # ------------------------------------------------------- Manual / books
-    @mcp.tool(
-        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
-    )
-    @_safe
-    async def mealie_create_recipe(
-        name: Annotated[str, Field(min_length=2, max_length=200, description="Recipe title")],
-        ingredients: Annotated[
-            list[str],
-            Field(
-                min_length=1,
-                max_length=80,
-                description="One ingredient per entry, with quantity, e.g. '400g chicken breast, diced'",
-            ),
-        ],
-        instructions: Annotated[list[str], Field(min_length=1, max_length=40, description="One step per entry, in order")],
-        description: Annotated[str | None, Field(max_length=2000)] = None,
-        source: Annotated[
-            str | None, Field(max_length=300, description="Where it came from, e.g. 'Pinch of Nom: Everyday Light, page 112'")
-        ] = None,
-        servings: Annotated[int | None, Field(ge=1, le=50)] = None,
-        prep_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
-        cook_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
-        total_minutes: Annotated[int | None, Field(ge=0, le=2880)] = None,
-        nutrition: Annotated[
-            dict[str, str] | None,
-            Field(
-                description="Per serving, e.g. {'calories': '389 kcal', 'protein': '32g'}. Keys: calories, protein, fat, "
-                "saturated_fat, carbohydrates, sugar, fibre, salt"
-            ),
-        ] = None,
-        tags: Annotated[list[str] | None, Field(max_length=20, description="e.g. ['Pinch of Nom', 'Slow Cooker']")] = None,
-        dry_run: Annotated[bool, Field(description="Preview only; nothing is saved")] = False,
+    async def create_structured_recipe(
+        *,
+        name: str,
+        ingredients: list[str],
+        instructions: list[str],
+        description: str | None = None,
+        source: str | None = None,
+        servings: int | None = None,
+        prep_minutes: int | None = None,
+        cook_minutes: int | None = None,
+        total_minutes: int | None = None,
+        nutrition: dict[str, str] | None = None,
+        tags: list[str] | None = None,
+        dry_run: bool = False,
         skip_duplicates: bool = True,
     ) -> dict[str, Any]:
-        """Create a new Mealie recipe from structured data, e.g. transcribed from a cookbook page photo.
-
-        Use this for recipes that have no web page to import (books, handwritten cards). Transcribe exactly what
-        the page says; do not invent quantities or steps. Existing recipes are never modified; a recipe with the
-        same name is reported as a duplicate and skipped.
-        """
         clean = [i.strip() for i in ingredients if i and i.strip()]
         steps = [s.strip() for s in instructions if s and s.strip()]
         desc = (description or "").strip()
@@ -362,6 +341,62 @@ def build_server(
             "warnings": warnings or None,
         }
 
+    @mcp.tool(
+        annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+    )
+    @_safe
+    async def mealie_create_recipe(
+        name: Annotated[str, Field(min_length=2, max_length=200, description="Recipe title")],
+        ingredients: Annotated[
+            list[str],
+            Field(
+                min_length=1,
+                max_length=80,
+                description="One ingredient per entry, with quantity, e.g. '400g chicken breast, diced'",
+            ),
+        ],
+        instructions: Annotated[list[str], Field(min_length=1, max_length=40, description="One step per entry, in order")],
+        description: Annotated[str | None, Field(max_length=2000)] = None,
+        source: Annotated[
+            str | None, Field(max_length=300, description="Where it came from, e.g. 'Pinch of Nom: Everyday Light, page 112'")
+        ] = None,
+        servings: Annotated[int | None, Field(ge=1, le=50)] = None,
+        prep_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
+        cook_minutes: Annotated[int | None, Field(ge=0, le=1440)] = None,
+        total_minutes: Annotated[int | None, Field(ge=0, le=2880)] = None,
+        nutrition: Annotated[
+            dict[str, str] | None,
+            Field(
+                description="Per serving, e.g. {'calories': '389 kcal', 'protein': '32g'}. Keys: calories, protein, fat, "
+                "saturated_fat, carbohydrates, sugar, fibre, salt"
+            ),
+        ] = None,
+        tags: Annotated[list[str] | None, Field(max_length=20, description="e.g. ['Pinch of Nom', 'Slow Cooker']")] = None,
+        dry_run: Annotated[bool, Field(description="Preview only; nothing is saved")] = False,
+        skip_duplicates: bool = True,
+    ) -> dict[str, Any]:
+        """Create a new Mealie recipe from structured data, e.g. transcribed from a cookbook page photo.
+
+        Use this for recipes that have no web page to import (books, handwritten cards). Transcribe exactly what
+        the page says; do not invent quantities or steps. Existing recipes are never modified; a recipe with the
+        same name is reported as a duplicate and skipped.
+        """
+        return await create_structured_recipe(
+            name=name,
+            ingredients=ingredients,
+            instructions=instructions,
+            description=description,
+            source=source,
+            servings=servings,
+            prep_minutes=prep_minutes,
+            cook_minutes=cook_minutes,
+            total_minutes=total_minutes,
+            nutrition=nutrition,
+            tags=tags,
+            dry_run=dry_run,
+            skip_duplicates=skip_duplicates,
+        )
+
     # ------------------------------------------------------------ HelloFresh
     @mcp.tool(annotations=READ_ONLY_WEB)
     @_safe
@@ -415,6 +450,9 @@ def build_server(
         out["import"] = outcome.to_dict()
         return out
 
+    async def _hf_import_one_kw(*, name: str, subtitle: str | None, url: str | None, dry_run: bool) -> dict[str, Any]:
+        return await _hf_import_one(name, subtitle, url, dry_run)
+
     @mcp.tool(annotations=IMPORTS)
     @_safe
     async def hellofresh_import(
@@ -452,6 +490,41 @@ def build_server(
         statuses = [r.get("import_status") if r.get("status") == "matched" else r.get("status") for r in results]
         summary = {s: statuses.count(s) for s in sorted({str(s) for s in statuses})}
         return {"ok": True, "summary": summary, "results": results}
+
+    # ------------------------------------------------------- phone capture
+    async def _capture_import_url(url: str, dry_run: bool) -> dict[str, Any]:
+        try:
+            validate_hellofresh_url(url, settings.hellofresh_base_url)
+        except UrlValidationError:
+            clean = await check_import_url(url)
+            outcome = await mealie.import_url(clean, dry_run=effective_dry_run(dry_run))
+            return {"ok": outcome.status in ("imported", "duplicate", "dry_run"), **outcome.to_dict()}
+        out = await _hf_import_one("", None, url, dry_run)
+        imported = out.get("import") or {}
+        return {
+            "ok": out.get("import_status") in ("imported", "duplicate", "dry_run"),
+            "status": out.get("import_status"),
+            "message": imported.get("message") or out.get("message"),
+            "mealie_url": (imported.get("recipe") or {}).get("mealie_url"),
+        }
+
+    capture = CaptureApp(
+        auth=auth,
+        reader=reader
+        or (
+            RecipeReader(settings.claude_api_token.get_secret_value(), settings.claude_model)
+            if settings.claude_api_token
+            else None
+        ),
+        hf_import=_safe(_hf_import_one_kw),
+        create_recipe=_safe(create_structured_recipe),
+        import_url=_safe(_capture_import_url),
+        secure_cookie=settings.public_base_url.startswith("https://"),
+        max_images=settings.capture_max_images,
+    )
+    for path, methods, handler in capture.routes():
+        mcp.custom_route(path, methods=methods, include_in_schema=False)(handler)
+    mcp.state["capture"] = capture  # type: ignore[index]
 
     # --------------------------------------------------------------- health
     @mcp.custom_route("/health", methods=["GET"])
