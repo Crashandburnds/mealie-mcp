@@ -1,4 +1,4 @@
-"""Async client for the Mealie REST API (read + URL import only; no delete/overwrite)."""
+"""Async client for the Mealie REST API (reads and imports; editing lives in manage.py)."""
 
 from __future__ import annotations
 

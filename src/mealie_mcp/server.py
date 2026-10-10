@@ -21,8 +21,10 @@ from .capture import CaptureApp
 from .config import Settings
 from .hellofresh import HelloFreshClient, HelloFreshError, title_core
 from .logging_setup import log
+from .manage import Manager
 from .mealie import MealieClient, MealieError
 from .net import OutboundBlockedError, UrlValidationError, validate_hellofresh_url, validate_recipe_url
+from .tools_manage import MANAGE_INSTRUCTIONS, register_manage_tools
 from .vision import RecipeReader
 
 logger = logging.getLogger("mealie_mcp.server")
@@ -42,7 +44,7 @@ Typical workflow for HelloFresh recipe cards (photos or names):
    "not_found", show the alternatives to the user and do NOT guess. If you find the
    recipe URL yourself (e.g. via web search), pass it as `url` and it will be verified.
    For many recipes, send batches of about 5 per hellofresh_bulk_import call.
-4. Existing recipes are never modified or deleted; duplicates are reported and skipped.
+4. Imports never modify or delete existing recipes; duplicates are reported and skipped.
 For recipes from cookbooks or other sources without a web page, transcribe the page faithfully and use
 mealie_create_recipe (dry_run=true first if the user wants to check the transcription). If the recipe is
 also published online on an allowed domain, prefer mealie_import_url.
@@ -147,7 +149,7 @@ def build_server(
     else:
         log(logger, logging.WARNING, "AUTH_MODE=none: MCP endpoint is UNAUTHENTICATED. Never expose this to the internet.")
 
-    mcp = FastMCP(name="Mealie", instructions=INSTRUCTIONS, auth=auth, version=__version__)
+    mcp = FastMCP(name="Mealie", instructions=INSTRUCTIONS + MANAGE_INSTRUCTIONS, auth=auth, version=__version__)
     mcp.add_middleware(
         RateLimitingMiddleware(
             max_requests_per_second=settings.rate_limit_per_second,
@@ -525,6 +527,11 @@ def build_server(
     for path, methods, handler in capture.routes():
         mcp.custom_route(path, methods=methods, include_in_schema=False)(handler)
     mcp.state["capture"] = capture  # type: ignore[index]
+
+    # ----------------------------------------------------------- management
+    manager = Manager(mealie, settings.data_dir, import_domains=settings.import_allowed_domains)
+    register_manage_tools(mcp, manager, settings, _safe)
+    mcp.state["manager"] = manager  # type: ignore[index]
 
     # --------------------------------------------------------------- health
     @mcp.custom_route("/health", methods=["GET"])

@@ -1,7 +1,8 @@
 # mealie-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that lets **Claude**, **ChatGPT** (or any remote-MCP client) read and add recipes in a
-self-hosted [Mealie](https://mealie.io) library, with built-in **HelloFresh UK** lookup.
+An [MCP](https://modelcontextprotocol.io) server that lets **Claude**, **ChatGPT** (or any remote-MCP client) run a
+self-hosted [Mealie](https://mealie.io) library: add recipes (with built-in **HelloFresh UK** lookup), audit and edit them,
+fix photos, plan the week's meals and build shopping lists.
 
 Send Claude or ChatGPT photos of HelloFresh recipe cards and say *"Add these to my Mealie"*. The assistant reads each card, the server finds
 the exact recipe on hellofresh.co.uk, verifies it, checks Mealie for duplicates, and imports it with Mealie's own URL importer.
@@ -10,7 +11,7 @@ It reports back what was imported, already present, not found or failed.
 - Python 3.13, [FastMCP](https://gofastmcp.com) 4.1, **Streamable HTTP** at `/mcp`
 - **OAuth 2.1** authorisation server built in (discovery, dynamic client registration, PKCE, RFC 9207 `iss`), which is what
   Claude and ChatGPT custom connectors use. Approving a connection requires your owner password.
-- Read and import only: **no tool can delete or overwrite a recipe**
+- **No tool can delete a recipe.** Every recipe edit saves a backup first and can be undone with `mealie_restore_recipe`
 - Docker image `crashandburnds92/mealie-mcp` (linux/amd64 + linux/arm64), non-root, read-only filesystem, health checks
 
 ---
@@ -76,6 +77,33 @@ API use is billed per photo, separately from any Claude subscription. Without it
 All "adds" tools skip recipes that already exist (by source URL, HelloFresh recipe id, or exact name) and never modify
 existing ones. Set `DRY_RUN=true` to force every import into preview mode.
 
+### Managing the library
+
+| Tool | What it does | Writes? |
+|---|---|---|
+| `mealie_audit_recipes` | Scans every recipe for: no image, ingredients, steps, servings, time, tags, categories, source or nutrition; unparsed ingredients; possible duplicates | no |
+| `mealie_update_recipe` | Edit name, description, servings, times, ingredients, steps, notes, nutrition, tags, categories, tools, rating, source. Only the fields you pass change; `dry_run` shows a diff | edits (backed up) |
+| `mealie_set_recipe_image` | Set the photo from an image URL, or from the recipe's own source page | edits (backed up) |
+| `mealie_parse_ingredients` | Run Mealie's ingredient parser (quantity / unit / food) so shopping lists merge and scale; preview, then `apply=true` | edits (backed up) |
+| `mealie_list_recipe_backups` / `mealie_restore_recipe` | See and undo previous edits | restores |
+| `mealie_list_organizers` | All tags, categories or kitchen tools | no |
+| `mealie_suggest_recipes` | Random picks for planning, optionally by tag/category, skipping recently planned recipes | no |
+| `mealie_get_meal_plan` | The plan for a date range (default next 7 days) | no |
+| `mealie_add_meal_plan_entries` | Put recipes (or "Takeaway"-style notes) on days and meals | adds |
+| `mealie_update_meal_plan_entry` / `mealie_remove_meal_plan_entries` | Move, swap or remove plan entries (recipes are untouched) | edits / removes |
+| `mealie_get_shopping_lists` / `mealie_get_shopping_list` / `mealie_create_shopping_list` | View and create lists | no / adds |
+| `mealie_add_meal_plan_to_shopping_list` | Every planned recipe's ingredients for a date range onto a list | adds |
+| `mealie_add_recipes_to_shopping_list` / `mealie_add_shopping_items` | Specific recipes (scalable) or free-text items | adds |
+| `mealie_check_shopping_items` / `mealie_remove_shopping_items` / `mealie_remove_recipe_from_shopping_list` | Tick off or remove items | edits / removes |
+
+Backups are JSON copies of the recipe (plus the old photo when it is replaced) under `DATA_DIR/backups/<slug>/`, so they
+live in the same `/data` volume as the OAuth state. Ask *"undo the last change to the curry"* and the assistant restores
+the backup. Example requests:
+
+- *"Audit my Mealie and fix the missing pictures."*
+- *"Add 'Freezable' to every Pinch of Nom recipe that says it freezes."*
+- *"Plan dinners for next week from my chicken recipes, then make a shopping list for it and add milk and eggs."*
+
 ## How HelloFresh matching works
 
 HelloFresh has no public API, so the server **never trusts a single search hit**:
@@ -107,7 +135,8 @@ The first recipe, **Curried Chicken Thigh Traybake** *with Cumin Roast Potatoes,
 | Outbound calls | Each HTTP client is pinned to its host (your Mealie host; hellofresh.co.uk), including redirects. |
 | Abuse / load | MCP request rate limit (5/s, burst 30), HelloFresh throttle (1 req/s), timeouts everywhere, retries with backoff on 429/5xx. |
 | Container | Non-root (uid 10001), read-only root FS, all capabilities dropped, `no-new-privileges`, 256 MB memory limit. |
-| Destructive operations | None exist: there are no delete, update or overwrite tools. |
+| Destructive operations | No tool can delete a recipe. Recipe edits are backed up first and can be restored. Only meal plan entries and shopping list items can be removed. `DRY_RUN=true` turns every write into a preview. |
+| Image URLs | Same rules as import URLs (public https only), any domain; size-limited; every redirect hop re-checked. |
 
 ## Configuration
 
