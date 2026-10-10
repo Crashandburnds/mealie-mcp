@@ -109,14 +109,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_auth(self) -> Settings:
+        problems = []
         if self.auth_mode == "oauth":
             if not self.owner_password or len(self.owner_password.get_secret_value()) < 12:
-                raise ValueError("OWNER_PASSWORD must be set (min 12 characters) when AUTH_MODE=oauth")
+                problems.append("OWNER_PASSWORD must be set (min 12 characters) when AUTH_MODE=oauth")
             if not self.auth_secret or len(self.auth_secret.get_secret_value()) < 32:
-                raise ValueError("AUTH_SECRET must be set (min 32 characters) when AUTH_MODE=oauth")
-        for token in self.static_tokens:
-            if len(token.get_secret_value()) < 32:
-                raise ValueError("each STATIC_TOKENS entry must be at least 32 characters")
+                problems.append("AUTH_SECRET must be set (min 32 characters) when AUTH_MODE=oauth")
+        if any(len(t.get_secret_value()) < 32 for t in self.static_tokens):
+            problems.append("each STATIC_TOKENS entry must be at least 32 characters")
+        if problems:
+            raise ValueError("; ".join(problems))
         return self
 
     @property
