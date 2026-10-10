@@ -29,7 +29,8 @@ Managing the library (edits, images, meal plans, shopping lists):
   backup_id. mealie_restore_recipe undoes a change. Recipes are never deleted.
 - mealie_audit_recipes finds gaps (no image, no tags, unparsed ingredients, duplicates ...). Fix them with
   mealie_update_recipe, mealie_set_recipe_image and mealie_parse_ingredients.
-- Weekly plans: mealie_suggest_recipes (random picks, avoiding recently planned ones), then
+- Weekly plans: mealie_get_recipes_with_ingredients reads many recipes' ingredients at once (use it to apply the
+  user's criteria, e.g. proteins or an estimated budget), or mealie_suggest_recipes for random picks; then
   mealie_add_meal_plan_entries. Shopping: mealie_add_meal_plan_to_shopping_list collects every planned
   recipe's ingredients into a list; mealie_add_shopping_items adds extras.
 """
@@ -76,6 +77,23 @@ def register_manage_tools(mcp: FastMCP, manager: Manager, settings: Settings, sa
         """Audit the whole recipe library for missing images, ingredients, steps, servings, times, tags,
         categories, sources or nutrition, unparsed ingredients, and possible duplicates."""
         return {"ok": True, **(await manager.audit(checks=checks, max_recipes=max_recipes, limit_per_issue=limit_per_issue))}
+
+    @mcp.tool(annotations=READ)
+    @safe
+    async def mealie_get_recipes_with_ingredients(
+        slugs: Annotated[list[str] | None, Field(max_length=50, description="Specific recipes; omit to page through")] = None,
+        search: Annotated[str | None, Field(max_length=200, description="Only recipes matching this text")] = None,
+        tags: Annotated[list[str] | None, Field(description="Only recipes with any of these tags")] = None,
+        categories: Annotated[list[str] | None, Field(description="Only recipes in any of these categories")] = None,
+        page: Annotated[int, Field(ge=1)] = 1,
+        per_page: Annotated[int, Field(ge=1, le=50)] = 25,
+    ) -> dict[str, Any]:
+        """Get many recipes at once with their full ingredient lists, servings and tags: for choosing a week's
+        meals against criteria (e.g. proteins, budget) and estimating shopping costs. Page through with `page`."""
+        out = await manager.recipes_with_ingredients(
+            slugs=slugs, search=search, tags=tags, categories=categories, page=page, per_page=per_page
+        )
+        return {"ok": True, **out}
 
     @mcp.tool(annotations=READ)
     @safe

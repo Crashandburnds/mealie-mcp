@@ -649,6 +649,69 @@ class Manager:
         }
 
     # ======================================================= organizers
+    async def recipes_with_ingredients(
+        self,
+        *,
+        slugs: list[str] | None,
+        search: str | None,
+        tags: list[str] | None,
+        categories: list[str] | None,
+        page: int,
+        per_page: int,
+    ) -> dict[str, Any]:
+        """Many recipes with their ingredient lists in one call (for planning and costing)."""
+        if slugs:
+            chosen = [{"slug": _clean_slug(s)} for s in slugs[:per_page]]
+            total, total_pages = len(slugs), 1
+        else:
+            params: dict[str, Any] = {"page": page, "perPage": per_page, "orderBy": "name", "orderDirection": "asc"}
+            if search:
+                params["search"] = search
+            filters = []
+            if tags:
+                filters.append(f"tags.name IN [{', '.join(json.dumps(t) for t in tags)}]")
+            if categories:
+                filters.append(f"recipeCategory.name IN [{', '.join(json.dumps(c) for c in categories)}]")
+            if filters:
+                params["queryFilter"] = " AND ".join(filters)
+            data = await self._req("GET", "/api/recipes", params=params)
+            chosen = data.get("items", [])
+            total = data.get("total", len(chosen))
+            total_pages = _get(data, "total_pages", "totalPages", default=1)
+        group = await self.mealie._group()
+        sem = asyncio.Semaphore(4)
+
+        async def one(slug: str) -> dict[str, Any]:
+            async with sem:
+                try:
+                    r = await self.raw_recipe(slug)
+                except MealieError as exc:
+                    if exc.kind in ("auth_error", "connection_error"):
+                        raise
+                    return {"slug": slug, "error": str(exc)}
+            ingredients = []
+            for ing in r.get("recipeIngredient") or []:
+                text = ingredient_text(ing)
+                if not text:
+                    continue
+                if ing.get("title"):
+                    ingredients.append(f"## {ing['title']}")
+                ingredients.append(text)
+            link = f"{self.base_url}/g/{group}/r/{r.get('slug')}" if group else f"{self.base_url}/recipe/{r.get('slug')}"
+            return {
+                "name": r.get("name"),
+                "slug": r.get("slug"),
+                "servings": r.get("recipeServings") or None,
+                "total_time": r.get("totalTime") or None,
+                "tags": [t.get("name") for t in r.get("tags") or []],
+                "categories": [c.get("name") for c in r.get("recipeCategory") or []],
+                "ingredients": ingredients,
+                "mealie_url": link,
+            }
+
+        recipes = await asyncio.gather(*(one(c["slug"]) for c in chosen))
+        return {"page": page, "total": total, "total_pages": total_pages, "recipes": list(recipes)}
+
     async def list_organizers(self, kind: str) -> list[dict[str, Any]]:
         data = await self._req(
             "GET", f"/api/organizers/{kind}", params={"perPage": -1, "orderBy": "name", "orderDirection": "asc"}

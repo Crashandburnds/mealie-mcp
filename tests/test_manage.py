@@ -354,3 +354,12 @@ async def test_global_dry_run_blocks_writes(settings, lib):
     await call(mcp, "mealie_remove_shopping_items", item_ids=[LIST_ID])
     await call(mcp, "mealie_add_meal_plan_entries", entries=[{"date": "2026-10-12", "recipe_slug": "curry"}])
     assert lib.patches == [] and lib.plan == []
+
+
+async def test_recipes_with_ingredients(mcp, lib):
+    out = await call(mcp, "mealie_get_recipes_with_ingredients")
+    assert out["total"] == 3 and len(out["recipes"]) == 3
+    curry = next(r for r in out["recipes"] if r["slug"] == "curry")
+    assert curry["ingredients"] == ["400g chicken thighs", "1 onion"] and curry["servings"] == 2
+    out = await call(mcp, "mealie_get_recipes_with_ingredients", slugs=["pie", "missing"])
+    assert out["recipes"][0]["name"] == "Shepherd's Pie" and "error" in out["recipes"][1]

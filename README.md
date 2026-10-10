@@ -86,6 +86,7 @@ existing ones. Set `DRY_RUN=true` to force every import into preview mode.
 | `mealie_set_recipe_image` | Set the photo from an image URL, or from the recipe's own source page | edits (backed up) |
 | `mealie_parse_ingredients` | Run Mealie's ingredient parser (quantity / unit / food) so shopping lists merge and scale; preview, then `apply=true` | edits (backed up) |
 | `mealie_list_recipe_backups` / `mealie_restore_recipe` | See and undo previous edits | restores |
+| `mealie_get_recipes_with_ingredients` | Many recipes at once (up to 50 per page, or by tag / category / search) with full ingredient lists, for planning a week against criteria and estimating costs | no |
 | `mealie_list_organizers` | All tags, categories or kitchen tools | no |
 | `mealie_suggest_recipes` | Random picks for planning, optionally by tag/category, skipping recently planned recipes | no |
 | `mealie_get_meal_plan` | The plan for a date range (default next 7 days) | no |
