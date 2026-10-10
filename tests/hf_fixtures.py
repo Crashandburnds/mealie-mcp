@@ -85,3 +85,38 @@ LIVE_SEARCH_API = {
         for rid in ("6a4538ec66926770e8cd4e57", "6a3c0228bcb653703ca89dfa", "6a33d34b66e2e6a02a0c6b4e")
     ]
 }
+
+
+# Live case (2026-10-10), card "Ultimate Thai Green Style Chicken Curry with Mangetout, Jasmine Rice and Peanuts":
+# no page shows that exact recipe. Re-runs with the card's headline link to an older page whose recipe is the
+# Tenderstem/Baby Corn version, and a different "Zesty Rice" variant has its own page.
+THAI_ZESTY_ID, THAI_OLD_ID = "664c9b5a8606e082f18851e5", "62bc20e40ecd28535d024d92"
+THAI_ZESTY_URL = f"{HF}/recipes/ultimate-thai-green-style-chicken-curry-{THAI_ZESTY_ID}"
+THAI_OLD_URL = f"{HF}/recipes/ultimate-thai-green-style-chicken-curry-{THAI_OLD_ID}"
+THAI_ZESTY_PAGE = recipe_page(
+    THAI_ZESTY_ID,
+    "Ultimate Thai Green Style Chicken Curry with Zesty Rice, Mangetout, Coriander and Peanuts",
+    "with Zesty Rice, Mangetout, Coriander and Peanuts",
+)
+THAI_OLD_PAGE = recipe_page(
+    "not-this-id", "Ultimate Thai Green Style Chicken Curry with Tenderstem®, Baby Corn, Jasmine Rice and Peanuts", ""
+)
+THAI_SEARCH_API = {
+    "items": [
+        {
+            "id": THAI_ZESTY_ID,
+            "name": "Ultimate Thai Green Style Chicken Curry",
+            "headline": "with Zesty Rice, Mangetout, Coriander and Peanuts",
+            "websiteUrl": THAI_ZESTY_URL,
+        }
+    ]
+    + [
+        {
+            "id": rid,
+            "name": "Ultimate Thai Green Style Chicken Curry",
+            "headline": "with Mangetout, Jasmine Rice and Peanuts",
+            "websiteUrl": THAI_OLD_URL,
+        }
+        for rid in ("6616643417fb871fe34f3a15", "65b90240d1da3988cdd8db96")
+    ]
+}

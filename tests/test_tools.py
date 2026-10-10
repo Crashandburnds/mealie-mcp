@@ -221,3 +221,27 @@ async def test_pagination_fields(live_mcp, fake_mealie):
     fake_mealie.recipes["a"] = {"slug": "a", "name": "A", "orgURL": None}
     out = await call(live_mcp, "mealie_list_recipes")
     assert out["total_pages"] == 1 and out["per_page"] == 50
+
+
+async def test_variant_with_similar_subtitle_is_never_imported(settings, fake_mealie, router):
+    from .hf_fixtures import THAI_OLD_PAGE, THAI_OLD_URL, THAI_SEARCH_API, THAI_ZESTY_PAGE, THAI_ZESTY_URL
+
+    router.get(f"{HF}/recipes").mock(return_value=httpx.Response(200, text=HOME_PAGE))
+    router.get(f"{HF}/gw/recipes/recipes/search").mock(return_value=httpx.Response(200, json=THAI_SEARCH_API))
+    router.get(THAI_ZESTY_URL).mock(return_value=httpx.Response(200, text=THAI_ZESTY_PAGE))
+    router.get(THAI_OLD_URL).mock(return_value=httpx.Response(200, text=THAI_OLD_PAGE))
+    server = build_server(
+        settings, mealie=MealieClient(MEALIE, TOKEN, max_retries=1), hellofresh=HelloFreshClient(HF, min_interval=0)
+    )
+    out = await call(
+        server,
+        "hellofresh_import",
+        name="Ultimate Thai Green Style Chicken Curry",
+        subtitle="with Mangetout, Jasmine Rice and Peanuts",
+    )
+    assert out["import_status"] == "not_imported"
+    assert fake_mealie.created == []
+    alts = {a["url"]: a for a in out["alternatives"]}
+    assert set(alts) == {THAI_ZESTY_URL, THAI_OLD_URL}  # re-runs collapsed
+    # The old page is judged by what it shows (Tenderstem), not the search listing's headline.
+    assert "Tenderstem" in alts[THAI_OLD_URL]["headline"]

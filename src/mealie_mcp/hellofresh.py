@@ -42,7 +42,9 @@ logger = logging.getLogger("mealie_mcp.hellofresh")
 NEXT_DATA_RE = re.compile(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
 LD_JSON_RE = re.compile(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
 RECIPE_LINK_RE = re.compile(r'href="((?:https://www\.hellofresh\.co\.uk)?/recipes/[a-z0-9-]+-[0-9a-f]{24})"')
-SUBTITLE_THRESHOLD = 85
+# token_sort_ratio on normalised subtitles. Tight on purpose: HelloFresh variants often share most words
+# ("Mangetout, Jasmine Rice and Peanuts" vs "Zesty Rice, Mangetout, Coriander and Peanuts" scores 79).
+SUBTITLE_THRESHOLD = 92
 
 
 class HelloFreshError(Exception):
@@ -397,6 +399,11 @@ class HelloFreshClient:
                 break
         if not ld:
             raise HelloFreshError("page has no recipe data (it may not be a recipe page)", kind="not_a_recipe")
+        # The page's own title is authoritative: search listings for re-runs can carry a headline that
+        # differs from the recipe the page actually shows.
+        _, title_sub = split_title(" ".join(html.unescape(ld.get("name") or "").split()))
+        if title_sub:
+            headline = title_sub
         nutrition = {k: v for k, v in (ld.get("nutrition") or {}).items() if not k.startswith("@") and v not in (None, "")}
         image = ld.get("image")
         if isinstance(image, list):
@@ -496,7 +503,7 @@ class HelloFreshClient:
             c.exact_name = bool(target) and (core == target or (full_target is not None and normalise(c.name) == full_target))
             c.name_score = fuzz.token_sort_ratio(target, core) if target else 0.0
             if target_sub and c.headline:
-                c.subtitle_score = float(fuzz.token_set_ratio(target_sub, _strip_with(c.headline)))
+                c.subtitle_score = float(fuzz.token_sort_ratio(target_sub, _strip_with(c.headline)))
 
         def confident(c: Candidate) -> bool:
             if not c.verified:
