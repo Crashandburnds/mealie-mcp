@@ -1,0 +1,53 @@
+# Docker Compose for mealie-mcp. Works with `docker compose up -d` and can be
+# pasted (with values filled in) into TrueNAS SCALE > Apps > Discover Apps >
+# Custom App > "Install via YAML". See README.md for step-by-step instructions.
+services:
+  mealie-mcp:
+    image: crashandburnds92/mealie-mcp:latest
+    container_name: mealie-mcp
+    restart: unless-stopped
+    environment:
+      MEALIE_URL: ${MEALIE_URL:-https://mealie.crashtech.co.uk}
+      MEALIE_API_TOKEN: ${MEALIE_API_TOKEN:?set MEALIE_API_TOKEN}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://mcp.crashtech.co.uk}
+      AUTH_MODE: oauth
+      OWNER_PASSWORD: ${OWNER_PASSWORD:?set OWNER_PASSWORD}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      STATIC_TOKENS: ${STATIC_TOKENS:-}
+      IMPORT_ALLOWED_DOMAINS: ${IMPORT_ALLOWED_DOMAINS:-hellofresh.co.uk}
+      DRY_RUN: ${DRY_RUN:-false}
+      PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    ports:
+      # Host port 8765 -> container 8000. Point Nginx Proxy Manager at <truenas-ip>:8765.
+      - "${HOST_PORT:-8765}:8000"
+    volumes:
+      # Only stores OAuth client registrations (so ChatGPT stays connected after restarts).
+      - mealie-mcp-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mealie-mcp-data:
