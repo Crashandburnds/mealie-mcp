@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -23,6 +24,9 @@ from .mealie import MealieClient, MealieError
 from .net import OutboundBlockedError, UrlValidationError, validate_hellofresh_url, validate_recipe_url
 
 logger = logging.getLogger("mealie_mcp.server")
+
+# Git commit the image was built from (set by the Docker build), so you can tell which build is running.
+BUILD = os.environ.get("MEALIE_MCP_BUILD", "dev")[:12]
 
 INSTRUCTIONS = """\
 Tools for the user's self-hosted Mealie recipe manager, plus HelloFresh UK lookup and import.
@@ -137,7 +141,7 @@ def build_server(
     @_safe
     async def mealie_status() -> dict[str, Any]:
         """Check that the Mealie server is reachable and the API token is valid. Returns Mealie version and user."""
-        return {"ok": True, **(await mealie.status()), "dry_run_forced": settings.dry_run}
+        return {"ok": True, **(await mealie.status()), "dry_run_forced": settings.dry_run, "server_build": BUILD}
 
     @mcp.tool(annotations=READ_ONLY)
     @_safe
@@ -331,7 +335,7 @@ def build_server(
     # --------------------------------------------------------------- health
     @mcp.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({"status": "ok", "version": __version__})
+        return JSONResponse({"status": "ok", "version": __version__, "build": BUILD})
 
     @mcp.custom_route("/health/ready", methods=["GET"])
     async def ready(request: Request) -> JSONResponse:

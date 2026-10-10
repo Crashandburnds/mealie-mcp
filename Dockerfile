@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.title="mealie-mcp" \
       org.opencontainers.image.revision="${REVISION}"
 
 ENV PATH="/opt/venv/bin:$PATH" \
+    MEALIE_MCP_BUILD="${REVISION}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DATA_DIR=/data \
