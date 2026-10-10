@@ -53,13 +53,13 @@ def register(client, redirect=REDIRECT):
     )
 
 
-def start_authorize(client, client_id, challenge, state="xyz"):
+def start_authorize(client, client_id, challenge, state="xyz", redirect=REDIRECT):
     r = client.get(
         "/authorize",
         params={
             "response_type": "code",
             "client_id": client_id,
-            "redirect_uri": REDIRECT,
+            "redirect_uri": redirect,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "state": state,
@@ -72,20 +72,21 @@ def start_authorize(client, client_id, challenge, state="xyz"):
     assert login_url.startswith(f"{BASE}/oauth/login?txn=")
     page = client.get(login_url)
     assert page.status_code == 200
-    assert "form-action 'self' https://chatgpt.com;" in page.headers["content-security-policy"]
+    origin = "{0.scheme}://{0.netloc}".format(urlsplit(redirect))
+    assert f"form-action 'self' {origin};" in page.headers["content-security-policy"]
     txn = parse_qs(urlsplit(login_url).query)["txn"][0]
     csrf = re.search(r'name="csrf" value="([^"]+)"', page.text).group(1)
     return txn, csrf
 
 
-def full_login(client):
-    reg = register(client).json()
+def full_login(client, redirect=REDIRECT):
+    reg = register(client, redirect).json()
     verifier, challenge = pkce()
-    txn, csrf = start_authorize(client, reg["client_id"], challenge)
+    txn, csrf = start_authorize(client, reg["client_id"], challenge, redirect=redirect)
     r = client.post("/oauth/login", data={"txn": txn, "csrf": csrf, "password": OWNER_PASSWORD, "action": "approve"})
     assert r.status_code == 302
     location = r.headers["location"]
-    assert location.startswith(REDIRECT)
+    assert location.startswith(redirect)
     q = parse_qs(urlsplit(location).query)
     assert q["state"] == ["xyz"]
     assert q["iss"] == [client.get("/.well-known/oauth-authorization-server").json()["issuer"]]
@@ -94,7 +95,7 @@ def full_login(client):
         data={
             "grant_type": "authorization_code",
             "code": q["code"][0],
-            "redirect_uri": REDIRECT,
+            "redirect_uri": redirect,
             "client_id": reg["client_id"],
             "code_verifier": verifier,
             "resource": f"{BASE}/mcp",
@@ -278,3 +279,24 @@ def test_clients_persist_across_restart(settings, fake_mealie):
         _, challenge = pkce()
         start_authorize(c, client_id, challenge)
     assert (settings.data_dir / "clients.json").stat().st_mode & 0o077 == 0
+
+
+@pytest.mark.parametrize(
+    "redirect",
+    [
+        "https://claude.ai/api/mcp/auth_callback",  # claude.ai, Claude Desktop, Claude mobile
+        "http://localhost:53682/callback",  # Claude Code CLI (loopback, ephemeral port)
+        "http://127.0.0.1:61234/callback",
+    ],
+)
+def test_claude_clients_can_connect(client, redirect):
+    _, tokens, *_ = full_login(client, redirect)
+    assert mcp_call(client, tokens["access_token"]).status_code == 200
+
+
+def test_loopback_can_be_disabled(settings, fake_mealie):
+    settings.oauth_allow_loopback_redirects = False
+    app = create_app(settings, mealie=MealieClient(MEALIE, TOKEN), hellofresh=HelloFreshClient(HF))
+    with TestClient(app, base_url=BASE) as c:
+        assert register(c, "http://localhost:53682/callback").status_code == 400
+        assert register(c, "http://192.168.1.5:8080/callback").status_code == 400

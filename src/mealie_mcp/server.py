@@ -25,7 +25,8 @@ from .net import OutboundBlockedError, UrlValidationError, validate_hellofresh_u
 logger = logging.getLogger("mealie_mcp.server")
 
 INSTRUCTIONS = """\
-Tools for a self-hosted Mealie recipe manager, plus HelloFresh UK lookup and import.
+Tools for the user's self-hosted Mealie recipe manager, plus HelloFresh UK lookup and import.
+Works with any MCP client (ChatGPT, Claude, ...).
 
 Typical workflow for HelloFresh recipe cards (photos or names):
 1. Read the recipe title AND its subtitle (the "with ..." line) from the card.
@@ -106,6 +107,7 @@ def build_server(
             owner_password=settings.owner_password.get_secret_value(),  # type: ignore[union-attr]
             secret=settings.auth_secret.get_secret_value(),  # type: ignore[union-attr]
             allowed_redirect_hosts=settings.oauth_allowed_redirect_hosts,
+            allow_loopback_redirects=settings.oauth_allow_loopback_redirects,
             data_dir=settings.data_dir,
             access_ttl=settings.access_token_ttl_seconds,
             refresh_ttl=settings.refresh_token_ttl_seconds,

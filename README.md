@@ -1,15 +1,15 @@
 # mealie-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that lets **ChatGPT** (or any remote-MCP client) read and add recipes in a
+An [MCP](https://modelcontextprotocol.io) server that lets **Claude**, **ChatGPT** (or any remote-MCP client) read and add recipes in a
 self-hosted [Mealie](https://mealie.io) library, with built-in **HelloFresh UK** lookup.
 
-Send ChatGPT photos of HelloFresh recipe cards and say *"Add these to my Mealie"*. ChatGPT reads each card, the server finds
+Send Claude or ChatGPT photos of HelloFresh recipe cards and say *"Add these to my Mealie"*. The assistant reads each card, the server finds
 the exact recipe on hellofresh.co.uk, verifies it, checks Mealie for duplicates, and imports it with Mealie's own URL importer.
 It reports back what was imported, already present, not found or failed.
 
 - Python 3.13, [FastMCP](https://gofastmcp.com) 4.1, **Streamable HTTP** at `/mcp`
 - **OAuth 2.1** authorisation server built in (discovery, dynamic client registration, PKCE, RFC 9207 `iss`), which is what
-  ChatGPT custom connectors use. Approving a connection requires your owner password.
+  Claude and ChatGPT custom connectors use. Approving a connection requires your owner password.
 - Read and import only: **no tool can delete or overwrite a recipe**
 - Docker image `crashandburnds92/mealie-mcp` (linux/amd64 + linux/arm64), non-root, read-only filesystem, health checks
 
@@ -23,7 +23,7 @@ It reports back what was imported, already present, not found or failed.
 4. [Configuration](#configuration)
 5. [Deploy on TrueNAS SCALE](#deploy-on-truenas-scale-web-ui-no-ssh)
 6. [Cloudflare + Nginx Proxy Manager](#cloudflare--nginx-proxy-manager)
-7. [Connect ChatGPT](#connect-chatgpt)
+7. [Connect Claude](#connect-claude) · [Connect ChatGPT](#connect-chatgpt)
 8. [Verify the deployment and first import](#verify-the-deployment-and-the-first-import)
 9. [GitHub Actions → Docker Hub](#github-actions--docker-hub)
 10. [Development](#development)
@@ -61,7 +61,7 @@ HelloFresh has no public API, so the server **never trusts a single search hit**
 3. **Match strictly**: a candidate is a match only when the normalised title is **identical** and, if you give a subtitle
    (the "with …" line on the card), it matches too (≥ 85 % token similarity). Similar recipes such as
    *Curried Chicken **Breast** Traybake* are reported as `alternatives` and are **never** imported automatically.
-4. If HelloFresh search is unavailable or nothing matches, the tool says so. ChatGPT can then find the URL itself (web
+4. If HelloFresh search is unavailable or nothing matches, the tool says so. The assistant can then find the URL itself (web
    search) and pass it as `url` / `candidate_urls`, and that URL is verified the same way. URLs are never invented.
 
 The first recipe, **Curried Chicken Thigh Traybake** *with Cumin Roast Potatoes, Carrots and Green Beans*, is
@@ -74,7 +74,7 @@ The first recipe, **Curried Chicken Thigh Traybake** *with Cumin Roast Potatoes,
 |---|---|
 | Internet exposure | HTTPS terminated at Nginx Proxy Manager (Cloudflare in front). The container only serves `/mcp`, OAuth endpoints, `/health`. |
 | Authentication | OAuth 2.1 + PKCE (S256). Connecting a client requires the **owner password** on a consent page. Brute force: 5 failures per IP / 25 globally per 15 min. |
-| Client registration | Open dynamic registration (ChatGPT needs it), but redirect URIs must be `https://` on an allowlisted host (`chatgpt.com`, …). |
+| Client registration | Open dynamic registration (Claude and ChatGPT need it), but redirect URIs must be `https://` on an allowlisted host (`claude.ai`, `chatgpt.com`, …) or a loopback address on your own computer (Claude Code CLI). |
 | Tokens | 1 h access tokens + 30 day single-use rotating refresh tokens, HS256-signed, bound to `https://<host>/mcp` (audience). Rotate `AUTH_SECRET` to revoke everything. |
 | Mealie token | Only in env vars / Docker secrets; redacted from logs; never returned by tools. |
 | SSRF / LAN access | Import URLs must be `https`, on `IMPORT_ALLOWED_DOMAINS`, port 443, no IP literals, no `.local`/`.lan` names, and must resolve only to **public** IPs (Mealie fetches them). |
@@ -93,11 +93,12 @@ in `/run/secrets/<lowercase_name>`, for example `/run/secrets/mealie_api_token`.
 | `MEALIE_URL` | ✅ | | `https://mealie.crashtech.co.uk` (or LAN URL, see below) |
 | `MEALIE_API_TOKEN` | ✅ | | Mealie → *Profile → Manage API Tokens* |
 | `PUBLIC_BASE_URL` | ✅ | `http://localhost:8000` | `https://mcp.crashtech.co.uk`: must be the exact public origin |
-| `OWNER_PASSWORD` | ✅ (oauth) | | ≥ 12 chars; typed when you connect ChatGPT |
+| `OWNER_PASSWORD` | ✅ (oauth) | | ≥ 12 chars; typed when you connect Claude / ChatGPT |
 | `AUTH_SECRET` | ✅ (oauth) | | ≥ 32 chars; `openssl rand -hex 32` |
 | `AUTH_MODE` | | `oauth` | `none` only for local testing, **never** on the internet |
 | `STATIC_TOKENS` | | | Optional comma-separated bearer tokens (≥ 32 chars) for scripts / other clients |
-| `OAUTH_ALLOWED_REDIRECT_HOSTS` | | `chatgpt.com,chat.openai.com,claude.ai` | |
+| `OAUTH_ALLOWED_REDIRECT_HOSTS` | | `chatgpt.com,chat.openai.com,claude.ai,claude.com` | |
+| `OAUTH_ALLOW_LOOPBACK_REDIRECTS` | | `true` | Allow `http://localhost:<port>` sign-in callbacks (Claude Code CLI, MCP Inspector) |
 | `IMPORT_ALLOWED_DOMAINS` | | `hellofresh.co.uk` | Add more domains, or `*` for any public site |
 | `DRY_RUN` | | `false` | Force all imports into preview mode |
 | `BULK_IMPORT_MAX` | | `50` | |
@@ -200,7 +201,7 @@ version tag such as `crashandburnds92/mealie-mcp:1.0.0` if you prefer controlled
    Proxy status: **Proxied** (orange cloud) is fine.
 3. **SSL/TLS → Overview**: *Full (strict)* (requires a valid certificate on NPM, which the step below provides).
 4. If you use Bot Fight Mode / WAF custom rules / Cloudflare Access, make sure they don't challenge
-   `mcp.crashtech.co.uk`. ChatGPT's servers can't solve challenges. Add a WAF *Skip* rule for that hostname if needed.
+   `mcp.crashtech.co.uk`. Claude's and ChatGPT's servers can't solve challenges. Add a WAF *Skip* rule for that hostname if needed.
 5. Don't enable caching rules for this hostname (the defaults don't cache these responses).
 
 ### Nginx Proxy Manager proxy host
@@ -218,7 +219,7 @@ version tag such as `crashandburnds92/mealie-mcp:1.0.0` if you prefer controlled
 | Cache Assets | **off** |
 | Block Common Exploits | on |
 | Websockets Support | **on** (sets HTTP/1.1 upstream; harmless for Streamable HTTP) |
-| Access List | Publicly Accessible (ChatGPT must reach it; the app does its own OAuth) |
+| Access List | Publicly Accessible (Claude/ChatGPT must reach it; the app does its own OAuth) |
 
 *SSL tab*: Request a new Let's Encrypt certificate (use the **DNS challenge → Cloudflare** with an API token if port 80
 isn't open), enable **Force SSL**, **HTTP/2 Support** and **HSTS**.
@@ -260,6 +261,59 @@ curl https://mcp.crashtech.co.uk/.well-known/oauth-protected-resource/mcp
 
 ---
 
+## Connect Claude
+
+The server works with every Claude surface. Add it once on claude.ai and it is available in **claude.ai, Claude Desktop,
+Claude mobile and Claude Code on the web**. Claude Code on your own computer can use it too.
+
+### claude.ai / Desktop / mobile (and Claude Code on the web)
+
+1. <https://claude.ai> → **Settings → Connectors** → **Add custom connector**.
+2. **Name** `Mealie`, **Remote MCP server URL** `https://mcp.crashtech.co.uk/mcp`. If asked how to register, choose
+   **Register automatically** (dynamic client registration). Leave client ID/secret empty.
+3. **Add** → **Connect**. A window opens on `https://mcp.crashtech.co.uk/oauth/login`: enter your **OWNER_PASSWORD** →
+   **Approve**. Claude's callback is `https://claude.ai/api/mcp/auth_callback`, which is on the default allowlist.
+4. In a chat, enable **Mealie** from the tools/connectors menu (the "+" or slider icon), then ask, e.g.
+   *"Add this HelloFresh recipe to my Mealie"* with a photo of the card.
+
+Connectors added this way are also passed into **Claude Code on the web** sessions. Those sessions run in a sandbox
+whose network policy must allow `mcp.crashtech.co.uk`, so add that host to the environment's allowed domains if the
+connector shows as unreachable. Re-authorise at <https://claude.ai/customize/connectors> if a session reports the
+connector needs sign-in.
+
+### Claude Code (CLI on your computer)
+
+Using OAuth: Claude Code opens your browser and receives the sign-in on a `http://localhost:<port>/callback` loopback
+address, which is allowed by `OAUTH_ALLOW_LOOPBACK_REDIRECTS=true`:
+
+```bash
+claude mcp add --transport http --scope user mealie https://mcp.crashtech.co.uk/mcp
+claude mcp login mealie      # or run /mcp inside Claude Code; enter OWNER_PASSWORD in the browser
+```
+
+Or using a static token (no browser; set a long random value in `STATIC_TOKENS` on the server first):
+
+```bash
+claude mcp add --transport http --scope user mealie https://mcp.crashtech.co.uk/mcp \
+  --header "Authorization: Bearer YOUR_STATIC_TOKEN"
+```
+
+Or per project, committed as `.mcp.json` with the token read from an environment variable (never commit the token):
+
+```json
+{
+  "mcpServers": {
+    "mealie": {
+      "type": "http",
+      "url": "https://mcp.crashtech.co.uk/mcp",
+      "headers": { "Authorization": "Bearer ${MEALIE_MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+---
+
 ## Connect ChatGPT
 
 Custom MCP connectors are added in ChatGPT's **Developer mode** (a paid-plan feature; OpenAI changes plan availability
@@ -290,14 +344,14 @@ Try:
 To disconnect: delete the connector in ChatGPT. To revoke every issued token server-side, change `AUTH_SECRET` and
 restart the app.
 
-Other clients: anything that supports remote MCP + OAuth works the same way (e.g. Claude: *Settings → Connectors →
-Add custom connector* with the same URL). Scripts can use a `STATIC_TOKENS` value as `Authorization: Bearer …`.
+Other clients: anything that supports remote MCP + OAuth works the same way. Scripts can use a `STATIC_TOKENS` value
+as `Authorization: Bearer …`.
 
 ---
 
 ## Verify the deployment and the first import
 
-After connecting ChatGPT:
+After connecting Claude or ChatGPT:
 
 1. Ask *"Run mealie_status"* → expect `authenticated: true` and your Mealie version.
 2. Ask *"Use hellofresh_import with dry_run=true for 'Curried Chicken Thigh Traybake', subtitle 'with Cumin Roast
@@ -306,7 +360,7 @@ After connecting ChatGPT:
 3. Repeat without dry run → `import_status: imported` and a link to the new recipe in Mealie.
 4. Run it again → `import_status: duplicate` (nothing changed in Mealie).
 
-Without ChatGPT, using a static token (set `STATIC_TOKENS` first):
+Without an AI app, using a static token (set `STATIC_TOKENS` first):
 
 ```bash
 TOKEN=your-static-token
@@ -371,10 +425,10 @@ Layout: `src/mealie_mcp/` — `server.py` (tools, app), `mealie.py` (Mealie clie
 |---|---|
 | Container exits, log `configuration error: OWNER_PASSWORD ...` | Set the named variable (min lengths: password 12, secret 32). |
 | `/health/ready` → `mealie: unavailable` | Wrong `MEALIE_URL`/token, or Cloudflare blocking the server → use Mealie's LAN URL. |
-| ChatGPT: "error creating connector" / OAuth fails | `PUBLIC_BASE_URL` must be exactly `https://mcp.crashtech.co.uk`; check `curl https://mcp.crashtech.co.uk/.well-known/oauth-authorization-server`. Check Cloudflare isn't challenging the host. |
-| Login page says "link expired" | Sign-in links last 10 minutes; start again from ChatGPT. |
+| Claude/ChatGPT: "error creating connector" / OAuth fails | `PUBLIC_BASE_URL` must be exactly `https://mcp.crashtech.co.uk`; check `curl https://mcp.crashtech.co.uk/.well-known/oauth-authorization-server`. Check Cloudflare isn't challenging the host. |
+| Login page says "link expired" | Sign-in links last 10 minutes; start again from your AI app. |
 | "Too many failed attempts" | Wait 15 minutes (or restart the app). |
-| `hellofresh_*` → `search_unavailable` | HelloFresh changed their site or blocked the request. Ask ChatGPT to find the hellofresh.co.uk URL by web search and pass it as `url`; it is still verified. |
+| `hellofresh_*` → `search_unavailable` | HelloFresh changed their site or blocked the request. Ask the assistant to find the hellofresh.co.uk URL by web search and pass it as `url`; it is still verified. |
 | Import → `failed: Recipe scraping failed` | Mealie's scraper couldn't parse the page; try again later or import manually in Mealie. |
-| ChatGPT times out on big batches | Ask for batches of ~5 recipes per call. |
+| The assistant times out on big batches | Ask for batches of ~5 recipes per call. |
 | 524 errors from Cloudflare | Make sure NPM has `proxy_buffering off` (Advanced tab). |

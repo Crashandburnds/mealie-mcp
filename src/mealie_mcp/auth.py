@@ -1,20 +1,21 @@
 """Self-contained OAuth 2.1 authorization server for a single owner.
 
-ChatGPT's custom connectors authenticate to remote MCP servers with OAuth 2.1
+ChatGPT and Claude custom connectors authenticate to remote MCP servers with OAuth 2.1
 (MCP authorization spec): protected-resource metadata (RFC 9728),
 authorization-server metadata (RFC 8414), dynamic client registration
 (RFC 7591), authorization code + PKCE (S256) and bearer access tokens.
 
 FastMCP provides the endpoints; this provider supplies the policy:
 
-* Client registration is open (ChatGPT registers itself), but redirect URIs
-  must be https on an allowlisted host (chatgpt.com by default).
+* Client registration is open (ChatGPT and Claude register themselves), but
+  redirect URIs must be https on an allowlisted host (chatgpt.com, claude.ai, ...)
+  or a loopback address (native apps such as Claude Code).
 * Every authorization requires the owner password on a consent page served by
   this server. Failed attempts are rate limited per IP and globally.
 * Access/refresh tokens are HS256 JWTs bound to this server's resource URL,
   so they survive container restarts. Rotating AUTH_SECRET revokes them all.
 * Registered clients are persisted to DATA_DIR/clients.json (if writable) so
-  ChatGPT does not need to re-register after a restart.
+  clients do not need to re-register after a restart.
 """
 
 from __future__ import annotations
@@ -91,6 +92,7 @@ class OwnerOAuthProvider(OAuthProvider):
         access_ttl: int = 3600,
         refresh_ttl: int = 30 * 86400,
         static_tokens: list[str] | None = None,
+        allow_loopback_redirects: bool = True,
     ) -> None:
         super().__init__(
             base_url=base_url,
@@ -103,6 +105,7 @@ class OwnerOAuthProvider(OAuthProvider):
         self._password = owner_password.encode()
         self._secret = secret
         self._allowed_hosts = [h.lower() for h in allowed_redirect_hosts]
+        self._allow_loopback = allow_loopback_redirects
         self._access_ttl = access_ttl
         self._refresh_ttl = refresh_ttl
         self._static_tokens = [t.encode() for t in static_tokens or []]
@@ -148,8 +151,9 @@ class OwnerOAuthProvider(OAuthProvider):
         host = (parts.hostname or "").lower()
         if parts.scheme == "https" and host in self._allowed_hosts:
             return True
-        # Loopback redirects for local tools (MCP Inspector) only if explicitly allowlisted.
-        return parts.scheme == "http" and host in ("localhost", "127.0.0.1") and host in self._allowed_hosts
+        # RFC 8252 loopback redirects for native apps on your own machine (Claude Code, MCP Inspector).
+        # The authorization code can only reach the computer where the owner typed the password.
+        return self._allow_loopback and parts.scheme == "http" and host in ("localhost", "127.0.0.1", "::1")
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._clients.get(client_id)
@@ -252,14 +256,14 @@ button{{padding:.6rem 1rem;font-size:1rem;border:0;border-radius:8px;margin-righ
             txn = request.query_params.get("txn", "")
             pending = self._pending.get(txn)
             if not pending:
-                return HTMLResponse("<h1>This sign-in link has expired. Start again from ChatGPT.</h1>", status_code=400)
+                return HTMLResponse("<h1>This sign-in link has expired. Start again from your AI app.</h1>", status_code=400)
             return self._login_page(pending, txn)
 
         form = await request.form()
         txn = str(form.get("txn", ""))
         pending = self._pending.get(txn)
         if not pending or not hmac.compare_digest(str(form.get("csrf", "")), pending.csrf):
-            return HTMLResponse("<h1>This sign-in link has expired. Start again from ChatGPT.</h1>", status_code=400)
+            return HTMLResponse("<h1>This sign-in link has expired. Start again from your AI app.</h1>", status_code=400)
         params = pending.params
         if form.get("action") == "deny":
             self._pending.pop(txn, None)

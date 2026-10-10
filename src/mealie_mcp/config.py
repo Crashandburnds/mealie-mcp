@@ -71,7 +71,9 @@ class Settings(BaseSettings):
     owner_password: SecretStr | None = None
     auth_secret: SecretStr | None = None
     static_tokens: Annotated[list[SecretStr], NoDecode] = []
-    oauth_allowed_redirect_hosts: CsvList = ["chatgpt.com", "chat.openai.com", "claude.ai"]
+    oauth_allowed_redirect_hosts: CsvList = ["chatgpt.com", "chat.openai.com", "claude.ai", "claude.com"]
+    # http://localhost:<port>/... redirects for native apps on your own computer (Claude Code CLI).
+    oauth_allow_loopback_redirects: bool = True
     access_token_ttl_seconds: int = 3600
     refresh_token_ttl_seconds: int = 60 * 60 * 24 * 30
     data_dir: Path = Path("/data")

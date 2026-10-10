@@ -23,7 +23,7 @@ services:
       # Host port 8765 -> container 8000. Point Nginx Proxy Manager at <truenas-ip>:8765.
       - "${HOST_PORT:-8765}:8000"
     volumes:
-      # Only stores OAuth client registrations (so ChatGPT stays connected after restarts).
+      # Only stores OAuth client registrations (so Claude/ChatGPT stay connected after restarts).
       - mealie-mcp-data:/data
     read_only: true
     tmpfs:
